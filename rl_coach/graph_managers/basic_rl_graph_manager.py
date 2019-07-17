@@ -18,7 +18,6 @@ from typing import Tuple, List
 from rl_coach.base_parameters import AgentParameters, VisualizationParameters, TaskParameters, \
     PresetValidationParameters
 from rl_coach.environments.environment import EnvironmentParameters, Environment
-from rl_coach.filters.filter import NoInputFilter, NoOutputFilter
 from rl_coach.graph_managers.graph_manager import GraphManager, ScheduleParameters
 from rl_coach.level_manager import LevelManager
 from rl_coach.utils import short_dynamic_import
@@ -32,29 +31,17 @@ class BasicRLGraphManager(GraphManager):
     def __init__(self, agent_params: AgentParameters, env_params: EnvironmentParameters,
                  schedule_params: ScheduleParameters,
                  vis_params: VisualizationParameters=VisualizationParameters(),
-                 preset_validation_params: PresetValidationParameters = PresetValidationParameters(),
-                 name='simple_rl_graph'):
-        super().__init__(name, schedule_params, vis_params)
-
+                 preset_validation_params: PresetValidationParameters = PresetValidationParameters()):
+        super().__init__('simple_rl_graph', schedule_params, vis_params)
         self.agent_params = agent_params
         self.env_params = env_params
         self.preset_validation_params = preset_validation_params
-        self.agent_params.visualization = vis_params
 
+        self.agent_params.visualization = vis_params
         if self.agent_params.input_filter is None:
-            if env_params is not None:
-                self.agent_params.input_filter = env_params.default_input_filter()
-            else:
-                # In cases where there is no environment (e.g. batch-rl and imitation learning), there is nowhere to get
-                # a default filter from. So using a default no-filter.
-                # When there is no environment, the user is expected to define input/output filters (if required) using
-                # the preset.
-                self.agent_params.input_filter = NoInputFilter()
+            self.agent_params.input_filter = env_params.default_input_filter()
         if self.agent_params.output_filter is None:
-            if env_params is not None:
-                self.agent_params.output_filter = env_params.default_output_filter()
-            else:
-                self.agent_params.output_filter = NoOutputFilter()
+            self.agent_params.output_filter = env_params.default_output_filter()
 
     def _create_graph(self, task_parameters: TaskParameters) -> Tuple[List[LevelManager], List[Environment]]:
         # environment loading
@@ -72,13 +59,3 @@ class BasicRLGraphManager(GraphManager):
         level_manager = LevelManager(agents=agent, environment=env, name="main_level")
 
         return [level_manager], [env]
-
-    def log_signal(self, signal_name, value):
-        self.level_managers[0].agents['agent'].agent_logger.create_signal_value(signal_name, value)
-
-    def get_signal_value(self, signal_name):
-        return self.level_managers[0].agents['agent'].agent_logger.get_signal_value(signal_name)
-
-    def get_agent(self):
-        return self.level_managers[0].agents['agent']
-

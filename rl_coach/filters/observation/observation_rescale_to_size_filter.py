@@ -15,12 +15,24 @@
 #
 
 import copy
-from skimage.transform import resize
+from enum import Enum
+
 import numpy as np
+import scipy.ndimage
 
 from rl_coach.core_types import ObservationType
 from rl_coach.filters.observation.observation_filter import ObservationFilter
 from rl_coach.spaces import ObservationSpace, PlanarMapsObservationSpace, ImageObservationSpace
+
+
+# imresize interpolation types as defined by scipy here:
+# https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.misc.imresize.html
+class RescaleInterpolationType(Enum):
+    NEAREST = 'nearest'
+    LANCZOS = 'lanczos'
+    BILINEAR = 'bilinear'
+    BICUBIC = 'bicubic'
+    CUBIC = 'cubic'
 
 
 class ObservationRescaleToSizeFilter(ObservationFilter):
@@ -29,12 +41,15 @@ class ObservationRescaleToSizeFilter(ObservationFilter):
     necessarily keep the aspect ratio of the original observation.
     Warning: this requires the input observation to be of type uint8 due to scipy requirements!
     """
-    def __init__(self, output_observation_space: PlanarMapsObservationSpace):
+    def __init__(self, output_observation_space: PlanarMapsObservationSpace,
+                 rescaling_interpolation_type: RescaleInterpolationType=RescaleInterpolationType.BILINEAR):
         """
         :param output_observation_space: the output observation space
+        :param rescaling_interpolation_type: the interpolation type for rescaling
         """
         super().__init__()
         self.output_observation_space = output_observation_space
+        self.rescaling_interpolation_type = rescaling_interpolation_type
 
         if not isinstance(output_observation_space, PlanarMapsObservationSpace):
             raise ValueError("The rescale filter only applies to observation spaces that inherit from "
@@ -60,19 +75,20 @@ class ObservationRescaleToSizeFilter(ObservationFilter):
                              self.output_observation_space.shape[self.output_observation_space.channels_axis]))
 
     def filter(self, observation: ObservationType, update_internal_state: bool=True) -> ObservationType:
+        # scipy works only with uint8
         observation = observation.astype('uint8')
 
         # rescale
         if isinstance(self.output_observation_space, ImageObservationSpace):
-            observation = resize(observation, tuple(self.output_observation_space.shape), anti_aliasing=False,
-                                 preserve_range=True).astype('uint8')
-
+            observation = scipy.misc.imresize(observation,
+                                              tuple(self.output_observation_space.shape),
+                                              interp=self.rescaling_interpolation_type.value)
         else:
             new_observation = []
             for i in range(self.output_observation_space.shape[self.output_observation_space.channels_axis]):
-                new_observation.append(resize(observation.take(i, self.output_observation_space.channels_axis),
-                                              tuple(self.planar_map_output_shape),
-                                              preserve_range=True).astype('uint8'))
+                new_observation.append(scipy.misc.imresize(observation.take(i, self.output_observation_space.channels_axis),
+                                                  tuple(self.planar_map_output_shape),
+                                                  interp=self.rescaling_interpolation_type.value))
             new_observation = np.array(new_observation)
             observation = new_observation.swapaxes(0, self.output_observation_space.channels_axis)
 

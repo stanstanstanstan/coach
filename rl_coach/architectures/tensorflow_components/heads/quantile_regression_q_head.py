@@ -15,27 +15,25 @@
 #
 
 import tensorflow as tf
-import numpy as np
-from rl_coach.architectures.tensorflow_components.heads import QHead
+
 from rl_coach.architectures.tensorflow_components.layers import Dense
+from rl_coach.architectures.tensorflow_components.heads.head import Head
 from rl_coach.base_parameters import AgentParameters
+from rl_coach.core_types import QActionStateValue
 from rl_coach.spaces import SpacesDefinition
 
 
-class QuantileRegressionQHead(QHead):
+class QuantileRegressionQHead(Head):
     def __init__(self, agent_parameters: AgentParameters, spaces: SpacesDefinition, network_name: str,
                  head_idx: int = 0, loss_weight: float = 1., is_local: bool = True, activation_function: str='relu',
-                 dense_layer=Dense, output_bias_initializer=None):
+                 dense_layer=Dense):
         super().__init__(agent_parameters, spaces, network_name, head_idx, loss_weight, is_local, activation_function,
-                         dense_layer=dense_layer, output_bias_initializer=output_bias_initializer)
+                         dense_layer=dense_layer)
         self.name = 'quantile_regression_dqn_head'
         self.num_actions = len(self.spaces.action.actions)
         self.num_atoms = agent_parameters.algorithm.atoms  # we use atom / quantile interchangeably
         self.huber_loss_interval = agent_parameters.algorithm.huber_loss_interval  # k
-        self.quantile_probabilities = tf.cast(
-            tf.constant(np.ones(self.ap.algorithm.atoms) / float(self.ap.algorithm.atoms), dtype=tf.float32),
-            dtype=tf.float64)
-        self.loss_type = []
+        self.return_type = QActionStateValue
 
     def _build_module(self, input_layer):
         self.actions = tf.placeholder(tf.int32, [None, 2], name="actions")
@@ -43,8 +41,7 @@ class QuantileRegressionQHead(QHead):
         self.input = [self.actions, self.quantile_midpoints]
 
         # the output of the head is the N unordered quantile locations {theta_1, ..., theta_N}
-        quantiles_locations = self.dense_layer(self.num_actions * self.num_atoms)\
-            (input_layer, name='output', bias_initializer=self.output_bias_initializer)
+        quantiles_locations = self.dense_layer(self.num_actions * self.num_atoms)(input_layer, name='output')
         quantiles_locations = tf.reshape(quantiles_locations, (tf.shape(quantiles_locations)[0], self.num_actions, self.num_atoms))
         self.output = quantiles_locations
 
@@ -74,11 +71,6 @@ class QuantileRegressionQHead(QHead):
         quantile_regression_loss = tf.reduce_sum(quantile_huber_loss) / float(self.num_atoms)
         self.loss = quantile_regression_loss
         tf.losses.add_loss(self.loss)
-
-        self.q_values = tf.tensordot(tf.cast(self.output, tf.float64), self.quantile_probabilities, 1)
-
-        # used in batch-rl to estimate a probablity distribution over actions
-        self.softmax = self.add_softmax_with_temperature()
 
     def __str__(self):
         result = [

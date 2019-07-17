@@ -17,7 +17,6 @@ import copy
 from typing import Union, Dict
 
 from rl_coach.agents.composite_agent import CompositeAgent
-from rl_coach.agents.agent_interface import AgentInterface
 from rl_coach.core_types import EnvResponse, ActionInfo, RunPhase, ActionType, EnvironmentSteps, Transition
 from rl_coach.environments.environment import Environment
 from rl_coach.environments.environment_interface import EnvironmentInterface
@@ -39,17 +38,16 @@ class LevelManager(EnvironmentInterface):
     """
     def __init__(self,
                  name: str,
-                 agents: Union[AgentInterface, Dict[str, AgentInterface]],
+                 agents: Union['Agent', CompositeAgent, Dict[str, Union['Agent', CompositeAgent]]],
                  environment: Union['LevelManager', Environment],
-                 real_environment: Environment = None,
-                 steps_limit: EnvironmentSteps = EnvironmentSteps(1),
-                 should_reset_agent_state_after_time_limit_passes: bool = False,
-                 spaces_definition: SpacesDefinition = None
+                 real_environment: Environment=None,
+                 steps_limit: EnvironmentSteps=EnvironmentSteps(1),
+                 should_reset_agent_state_after_time_limit_passes: bool=False
                  ):
         """
         A level manager controls a single or multiple composite agents and a single environment.
         The environment can be either a real environment or another level manager behaving as an environment.
-        :param agents: a single agent or a dictionary of agents or composite agents to control
+        :param agents: a list of agents or composite agents to control
         :param environment: an environment or level manager to control
         :param real_environment: the real environment that is is acted upon. if this is None (which it should be for
          the most bottom level), it will be replaced by the environment parameter. For simple RL schemes, where there
@@ -58,7 +56,6 @@ class LevelManager(EnvironmentInterface):
         :param steps_limit: the number of time steps to run when stepping the internal components
         :param should_reset_agent_state_after_time_limit_passes: reset the agent after stepping for steps_limit
         :param name: the level's name
-        :param spaces_definition: external definition of spaces for when we don't have an environment (e.g. batch-rl)
         """
         super().__init__()
 
@@ -88,11 +85,9 @@ class LevelManager(EnvironmentInterface):
 
         if not isinstance(self.steps_limit, EnvironmentSteps):
             raise ValueError("The num consecutive steps for acting must be defined in terms of environment steps")
-        self.build(spaces_definition)
+        self.build()
 
-        # there are cases where we don't have an environment. e.g. in batch-rl or in imitation learning.
-        self.last_env_response = self.real_environment.last_env_response if self.real_environment else None
-
+        self.last_env_response = self.real_environment.last_env_response
         self.parent_graph_manager = None
 
     def handle_episode_ended(self) -> None:
@@ -105,13 +100,13 @@ class LevelManager(EnvironmentInterface):
     def reset_internal_state(self, force_environment_reset: bool = False) -> EnvResponse:
         """
         Reset the environment episode parameters
-        :param force_environment_reset: in some cases, resetting the environment can be suppressed by the environment
+        :param force_enviro nment_reset: in some cases, resetting the environment can be suppressed by the environment
                                         itself. This flag allows force the reset.
         :return: the environment response as returned in get_last_env_response
         """
         [agent.reset_internal_state() for agent in self.agents.values()]
         self.reset_required = False
-        if self.real_environment and self.real_environment.current_episode_steps_counter == 0:
+        if self.real_environment.current_episode_steps_counter == 0:
             self.last_env_response = self.real_environment.last_env_response
         return self.last_env_response
 
@@ -141,27 +136,19 @@ class LevelManager(EnvironmentInterface):
         """
         return {k: ActionInfo(v) for k, v in self.get_random_action().items()}
 
-    def build(self, spaces_definition: SpacesDefinition = None) -> None:
+    def build(self) -> None:
         """
         Build all the internal components of the level manager (composite agents and environment).
-        :param spaces_definition: external definition of spaces for when we don't have an environment (e.g. batch-rl)
         :return: None
         """
-        if spaces_definition is None:
-            # normally the spaces are defined by the environment, and we only gather these here
-            action_space = self.environment.action_space
-
-            if isinstance(action_space, dict):  # TODO: shouldn't be a dict
-                action_space = list(action_space.values())[0]
-
-            spaces = SpacesDefinition(state=self.real_environment.state_space,
-                                      goal=self.real_environment.goal_space,
-                                      # in HRL the agent might want to override this
-                                      action=action_space,
-                                      reward=self.real_environment.reward_space)
-        else:
-            spaces = spaces_definition
-
+        # TODO: move the spaces definition class to the environment?
+        action_space = self.environment.action_space
+        if isinstance(action_space, dict):  # TODO: shouldn't be a dict
+            action_space = list(action_space.values())[0]
+        spaces = SpacesDefinition(state=self.real_environment.state_space,
+                                  goal=self.real_environment.goal_space,  # in HRL the agent might want to override this
+                                  action=action_space,
+                                  reward=self.real_environment.reward_space)
         [agent.set_environment_parameters(spaces) for agent in self.agents.values()]
 
     def setup_logger(self) -> None:
@@ -205,13 +192,6 @@ class LevelManager(EnvironmentInterface):
         for agent in self.agents.values():
             agent.phase = val
 
-    def acting_agent(self) -> AgentInterface:
-        """
-        Return the agent in this level that gets to act in the environment
-        :return: Agent
-        """
-        return list(self.agents.values())[0]
-
     def step(self, action: Union[None, Dict[str, ActionType]]) -> EnvResponse:
         """
         Run a single step of following the behavioral scheme set for this environment.
@@ -232,7 +212,7 @@ class LevelManager(EnvironmentInterface):
 
         # step for several time steps
         accumulated_reward = 0
-        acting_agent = self.acting_agent()
+        acting_agent = list(self.agents.values())[0]
 
         for i in range(self.steps_limit.num_steps):
             # let the agent observe the result and decide if it wants to terminate the episode
@@ -308,12 +288,12 @@ class LevelManager(EnvironmentInterface):
         if self.reset_required:
             self.reset_internal_state()
 
-        acting_agent = self.acting_agent()
+        acting_agent = list(self.agents.values())[0]
 
         # for i in range(self.steps_limit.num_steps):
         # let the agent observe the result and decide if it wants to terminate the episode
-        done = acting_agent.observe_transition(transition)
-        acting_agent.act(transition.action)
+        done = acting_agent.emulate_observe_on_trainer(transition)
+        acting_agent.emulate_act_on_trainer(transition)
 
         if done:
             self.handle_episode_ended()

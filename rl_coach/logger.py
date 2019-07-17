@@ -185,9 +185,6 @@ class BaseLogger(object):
         self.time = time
 
     def create_signal_value(self, signal_name, value, overwrite=True, time=None):
-        if self.index_name == signal_name:
-            return False  # make sure that we don't create duplicate signals
-
         if self.last_line_idx_written_to_csv != 0:
             assert signal_name in self.data.columns
 
@@ -206,7 +203,7 @@ class BaseLogger(object):
             return True
         return False
 
-    def signal_value_exists(self, signal_name, time):
+    def signal_value_exists(self, time, signal_name):
         try:
             value = self.get_signal_value(time, signal_name)
             if value != value:  # value is nan
@@ -215,9 +212,7 @@ class BaseLogger(object):
             return False
         return True
 
-    def get_signal_value(self, signal_name, time=None):
-        if not time:
-            time = self.time
+    def get_signal_value(self, time, signal_name):
         return self.data.loc[time, signal_name]
 
     def dump_output_csv(self, append=True):
@@ -232,15 +227,12 @@ class BaseLogger(object):
 
         self.last_line_idx_written_to_csv = len(self.data.index)
 
-    def get_current_wall_clock_time(self):
-        if self.start_time:
-            return time.time() - self.start_time
-        else:
-            self.start_time = time.time()
-            return 0
-
     def update_wall_clock_time(self, index):
-        self.create_signal_value('Wall-Clock Time', self.get_current_wall_clock_time(), time=index)
+        if self.start_time:
+            self.create_signal_value('Wall-Clock Time', time.time() - self.start_time, time=index)
+        else:
+            self.create_signal_value('Wall-Clock Time', 0, time=index)
+            self.start_time = time.time()
 
 
 class EpisodeLogger(BaseLogger):
@@ -271,13 +263,10 @@ class EpisodeLogger(BaseLogger):
 
 
 class Logger(BaseLogger):
-    def __init__(self, index_name='Episode #'):
+    def __init__(self):
         super().__init__()
         self.doc_path = ''
-        self.index_name = index_name
-
-    def set_index_name(self, index_name):
-        self.index_name = index_name
+        self.index_name = 'Episode #'
 
     def set_logger_filenames(self, _experiments_path, logger_prefix='', task_id=None, add_timestamp=False, filename=''):
         self.experiments_path = _experiments_path
@@ -384,12 +373,12 @@ def summarize_experiment():
         screen.log_title("Results moved to: {}".format(new_path))
 
 
-def get_experiment_name(initial_experiment_name=None):
+def get_experiment_name(initial_experiment_name=''):
     global experiment_name
 
     match = None
     while match is None:
-        if initial_experiment_name is None:
+        if initial_experiment_name == '':
             msg_if_timeout = "Timeout waiting for experiement name."
             experiment_name = screen.ask_input_with_timeout("Please enter an experiment name: ", 60, msg_if_timeout)
         else:
@@ -409,12 +398,10 @@ def get_experiment_name(initial_experiment_name=None):
     return experiment_name
 
 
-def get_experiment_path(experiment_name, initial_experiment_path=None, create_path=True):
+def get_experiment_path(experiment_name, create_path=True):
     global experiment_path
 
-    if not initial_experiment_path:
-        initial_experiment_path = './experiments/'
-    general_experiments_path = os.path.join(initial_experiment_path, experiment_name)
+    general_experiments_path = os.path.join('./experiments/', experiment_name)
 
     cur_date = time_started.date()
     cur_time = time_started.time()

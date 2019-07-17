@@ -59,13 +59,9 @@ class ParameterNoise(ExplorationPolicy):
         self.network_params = network_params
         self._replace_network_dense_layers()
 
-    def get_action(self, action_values: List[ActionType]):
+    def get_action(self, action_values: List[ActionType]) -> ActionType:
         if type(self.action_space) == DiscreteActionSpace:
-            action = np.argmax(action_values)
-            one_hot_action_probabilities = np.zeros(len(self.action_space.actions))
-            one_hot_action_probabilities[action] = 1
-
-            return action, one_hot_action_probabilities
+            return np.argmax(action_values)
         elif type(self.action_space) == BoxActionSpace:
             action_values_mean = action_values[0].squeeze()
             action_values_std = action_values[1].squeeze()

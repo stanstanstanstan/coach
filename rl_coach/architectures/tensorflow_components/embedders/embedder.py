@@ -59,7 +59,6 @@ class InputEmbedder(object):
         # layers order is conv -> batchnorm -> activation -> dropout
         if isinstance(self.scheme, EmbedderScheme):
             self.layers_params = copy.copy(self.schemes[self.scheme])
-            self.layers_params = [convert_layer(l) for l in self.layers_params]
         else:
             # if scheme is specified directly, convert to TF layer if it's not a callable object
             # NOTE: if layer object is callable, it must return a TF tensor when invoked
@@ -147,11 +146,11 @@ class InputEmbedder(object):
         return self.name
 
     def __str__(self):
-        result = ['Input size = {}'.format(self._input_size)]
+        result = []
         if self.input_rescaling != 1.0 or self.input_offset != 0.0:
             result.append('Input Normalization (scale = {}, offset = {})'.format(self.input_rescaling, self.input_offset))
         result.extend([str(l) for l in self.layers_params])
-        if not self.layers_params:
-            result.append('No layers')
-
-        return '\n'.join(result)
+        if self.layers_params:
+            return '\n'.join(result)
+        else:
+            return 'No layers'

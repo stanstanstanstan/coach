@@ -14,25 +14,39 @@
 # limitations under the License.
 #
 
-from skimage.transform import resize
+from enum import Enum
 
+import scipy.ndimage
 
 from rl_coach.core_types import ObservationType
 from rl_coach.filters.observation.observation_filter import ObservationFilter
 from rl_coach.spaces import ObservationSpace
 
 
+# imresize interpolation types as defined by scipy here:
+# https://docs.scipy.org/doc/scipy-0.18.1/reference/generated/scipy.misc.imresize.html
+class RescaleInterpolationType(Enum):
+    NEAREST = 'nearest'
+    LANCZOS = 'lanczos'
+    BILINEAR = 'bilinear'
+    BICUBIC = 'bicubic'
+    CUBIC = 'cubic'
+
+
 class ObservationRescaleSizeByFactorFilter(ObservationFilter):
     """
     Rescales an image observation by some factor. For example, the image size
     can be reduced by a factor of 2.
+    Warning: this requires the input observation to be of type uint8 due to scipy requirements!
     """
-    def __init__(self, rescale_factor: float):
+    def __init__(self, rescale_factor: float, rescaling_interpolation_type: RescaleInterpolationType):
         """
         :param rescale_factor: the factor by which the observation will be rescaled
+        :param rescaling_interpolation_type: the interpolation type for rescaling
         """
         super().__init__()
-        self.rescale_factor = float(rescale_factor)
+        self.rescale_factor = float(rescale_factor)  # scipy requires float scale factors
+        self.rescaling_interpolation_type = rescaling_interpolation_type
         # TODO: allow selecting the channels dim
 
     def validate_input_observation_space(self, input_observation_space: ObservationSpace):
@@ -44,14 +58,13 @@ class ObservationRescaleSizeByFactorFilter(ObservationFilter):
             raise ValueError("Observations with 3 dimensions must have 3 channels in the last axis (RGB)")
 
     def filter(self, observation: ObservationType, update_internal_state: bool=True) -> ObservationType:
+        # scipy works only with uint8
         observation = observation.astype('uint8')
-        rescaled_output_size = tuple([int(self.rescale_factor * dim) for dim in observation.shape[:2]])
-
-        if len(observation.shape) == 3:
-            rescaled_output_size += (3,)
 
         # rescale
-        observation = resize(observation, rescaled_output_size, anti_aliasing=False, preserve_range=True).astype('uint8')
+        observation = scipy.misc.imresize(observation,
+                                          self.rescale_factor,
+                                          interp=self.rescaling_interpolation_type.value)
 
         return observation
 

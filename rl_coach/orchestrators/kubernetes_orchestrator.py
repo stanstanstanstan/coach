@@ -118,7 +118,7 @@ class Kubernetes(Deploy):
                 self.s3_access_key = os.environ.get('ACCESS_KEY_ID')
                 self.s3_secret_key = os.environ.get('SECRET_ACCESS_KEY')
 
-    def setup(self, crd=None) -> bool:
+    def setup(self) -> bool:
         """
         Deploys the memory backend and data stores if required.
         """
@@ -128,9 +128,6 @@ class Kubernetes(Deploy):
             return False
         if self.params.data_store_params.store_type == "nfs":
             self.nfs_pvc = self.data_store.get_info()
-
-        # Upload checkpoints in checkpoint_restore_dir (if provided) to the data store
-        self.data_store.setup_checkpoint_dir(crd)
         return True
 
     def deploy_trainer(self) -> bool:
@@ -144,6 +141,7 @@ class Kubernetes(Deploy):
 
         trainer_params.command += ['--memory_backend_params', json.dumps(self.params.memory_backend_parameters.__dict__)]
         trainer_params.command += ['--data_store_params', json.dumps(self.params.data_store_params.__dict__)]
+
         name = "{}-{}".format(trainer_params.run_type, uuid.uuid4())
 
         if self.params.data_store_params.store_type == "nfs":
@@ -168,7 +166,7 @@ class Kubernetes(Deploy):
                         name="nfs-pvc",
                         persistent_volume_claim=self.nfs_pvc
                     )],
-                    restart_policy='Never'
+                    restart_policy='OnFailure'
                 ),
             )
         else:
@@ -187,7 +185,7 @@ class Kubernetes(Deploy):
                 metadata=k8sclient.V1ObjectMeta(labels={'app': name}),
                 spec=k8sclient.V1PodSpec(
                     containers=[container],
-                    restart_policy='Never'
+                    restart_policy='OnFailure'
                 ),
             )
 
@@ -249,7 +247,7 @@ class Kubernetes(Deploy):
                         name="nfs-pvc",
                         persistent_volume_claim=self.nfs_pvc
                     )],
-                    restart_policy='Never'
+                    restart_policy='OnFailure'
                 ),
             )
         else:
@@ -268,7 +266,7 @@ class Kubernetes(Deploy):
                 metadata=k8sclient.V1ObjectMeta(labels={'app': name}),
                 spec=k8sclient.V1PodSpec(
                     containers=[container],
-                    restart_policy='Never'
+                    restart_policy='OnFailure'
                 )
             )
 
@@ -318,7 +316,7 @@ class Kubernetes(Deploy):
             return
 
         for pod in pods.items:
-            Process(target=self._tail_log_file, args=(pod.metadata.name, api_client, self.params.namespace, path), daemon=True).start()
+            Process(target=self._tail_log_file, args=(pod.metadata.name, api_client, self.params.namespace, path)).start()
 
     def _tail_log_file(self, pod_name, api_client, namespace, path):
         if not os.path.exists(path):
@@ -350,7 +348,7 @@ class Kubernetes(Deploy):
         if not pod:
             return
 
-        return self.tail_log(pod.metadata.name, api_client)
+        self.tail_log(pod.metadata.name, api_client)
 
     def tail_log(self, pod_name, corev1_api):
         while True:
@@ -384,9 +382,9 @@ class Kubernetes(Deploy):
                        container_status.state.waiting.reason == 'CrashLoopBackOff' or \
                        container_status.state.waiting.reason == 'ImagePullBackOff' or \
                        container_status.state.waiting.reason == 'ErrImagePull':
-                        return 1
+                        return
                 if container_status.state.terminated is not None:
-                    return container_status.state.terminated.exit_code
+                    return
 
     def undeploy(self):
         """

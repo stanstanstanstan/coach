@@ -139,7 +139,7 @@ def ClassToDict(x):
 
 
 def cmd_line_run(result, run_cmd, id=-1):
-    p = Popen(run_cmd, shell=True, executable="bash")
+    p = Popen(run_cmd, shell=True, executable="/bin/bash")
     while result[0] is None or result[0] == [None]:
         if id in killed_processes:
             p.kill()
@@ -220,7 +220,7 @@ def force_list(var):
 
 
 def squeeze_list(var):
-    if type(var) == list and len(var) == 1:
+    if len(var) == 1:
         return var[0]
     else:
         return var

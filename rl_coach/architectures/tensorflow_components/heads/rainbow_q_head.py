@@ -15,14 +15,15 @@
 #
 
 import tensorflow as tf
-import numpy as np
-from rl_coach.architectures.tensorflow_components.heads import QHead
+
 from rl_coach.architectures.tensorflow_components.layers import Dense
+from rl_coach.architectures.tensorflow_components.heads.head import Head
 from rl_coach.base_parameters import AgentParameters
+from rl_coach.core_types import QActionStateValue
 from rl_coach.spaces import SpacesDefinition
 
 
-class RainbowQHead(QHead):
+class RainbowQHead(Head):
     def __init__(self, agent_parameters: AgentParameters, spaces: SpacesDefinition, network_name: str,
                  head_idx: int = 0, loss_weight: float = 1., is_local: bool = True, activation_function: str='relu',
                  dense_layer=Dense):
@@ -30,10 +31,8 @@ class RainbowQHead(QHead):
                          dense_layer=dense_layer)
         self.num_actions = len(self.spaces.action.actions)
         self.num_atoms = agent_parameters.algorithm.atoms
+        self.return_type = QActionStateValue
         self.name = 'rainbow_q_values_head'
-        self.z_values = tf.cast(tf.constant(np.linspace(self.ap.algorithm.v_min, self.ap.algorithm.v_max,
-                                                        self.ap.algorithm.atoms), dtype=tf.float32), dtype=tf.float64)
-        self.loss_type = []
 
     def _build_module(self, input_layer):
         # state value tower - V
@@ -63,11 +62,6 @@ class RainbowQHead(QHead):
         self.target = self.distributions
         self.loss = tf.nn.softmax_cross_entropy_with_logits(labels=self.target, logits=values_distribution)
         tf.losses.add_loss(self.loss)
-
-        self.q_values = tf.tensordot(tf.cast(self.output, tf.float64), self.z_values, 1)
-
-        # used in batch-rl to estimate a probablity distribution over actions
-        self.softmax = self.add_softmax_with_temperature()
 
     def __str__(self):
         result = [

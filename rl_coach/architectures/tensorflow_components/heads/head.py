@@ -13,15 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+from typing import Type
 
 import numpy as np
 import tensorflow as tf
 from tensorflow.python.ops.losses.losses_impl import Reduction
-from rl_coach.architectures.tensorflow_components.layers import Dense, convert_layer_class
-from rl_coach.base_parameters import AgentParameters
+from rl_coach.architectures.tensorflow_components.layers import Dense
+from rl_coach.base_parameters import AgentParameters, Parameters, NetworkComponentParameters
 from rl_coach.spaces import SpacesDefinition
 from rl_coach.utils import force_list
-from rl_coach.architectures.tensorflow_components.utils import squeeze_tensor
+
 
 # Used to initialize weights for policy and value output layers
 def normalized_columns_initializer(std=1.0):
@@ -40,7 +41,7 @@ class Head(object):
     """
     def __init__(self, agent_parameters: AgentParameters, spaces: SpacesDefinition, network_name: str,
                  head_idx: int=0, loss_weight: float=1., is_local: bool=True, activation_function: str='relu',
-                 dense_layer=Dense, is_training=False):
+                 dense_layer=Dense):
         self.head_idx = head_idx
         self.network_name = network_name
         self.network_parameters = agent_parameters.network_wrappers[self.network_name]
@@ -62,9 +63,6 @@ class Head(object):
         self.dense_layer = dense_layer
         if self.dense_layer is None:
             self.dense_layer = Dense
-        else:
-            self.dense_layer = convert_layer_class(self.dense_layer)
-        self.is_training = is_training
 
     def __call__(self, input_layer):
         """
@@ -72,9 +70,8 @@ class Head(object):
         :param input_layer: the input to the graph
         :return: the output of the last layer and the target placeholder
         """
-
         with tf.variable_scope(self.get_name(), initializer=tf.contrib.layers.xavier_initializer()):
-            self._build_module(squeeze_tensor(input_layer))
+            self._build_module(input_layer)
 
             self.output = force_list(self.output)
             self.target = force_list(self.target)
@@ -159,7 +156,6 @@ class Head(object):
         # add regularizations
         for regularization in self.regularizations:
             self.loss.append(regularization)
-            tf.losses.add_loss(regularization)
 
     @classmethod
     def path(cls):

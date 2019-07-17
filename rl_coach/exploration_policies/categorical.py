@@ -19,7 +19,7 @@ from typing import List
 import numpy as np
 
 from rl_coach.core_types import RunPhase, ActionType
-from rl_coach.exploration_policies.exploration_policy import DiscreteActionExplorationPolicy, ExplorationParameters
+from rl_coach.exploration_policies.exploration_policy import ExplorationPolicy, ExplorationParameters
 from rl_coach.spaces import ActionSpace
 
 
@@ -29,7 +29,7 @@ class CategoricalParameters(ExplorationParameters):
         return 'rl_coach.exploration_policies.categorical:Categorical'
 
 
-class Categorical(DiscreteActionExplorationPolicy):
+class Categorical(ExplorationPolicy):
     """
     Categorical exploration policy is intended for discrete action spaces. It expects the action values to
     represent a probability distribution over the action, from which a single action will be sampled.
@@ -42,18 +42,13 @@ class Categorical(DiscreteActionExplorationPolicy):
         """
         super().__init__(action_space)
 
-    def get_action(self, action_values: List[ActionType]) -> (ActionType, List[float]):
+    def get_action(self, action_values: List[ActionType]) -> ActionType:
         if self.phase == RunPhase.TRAIN:
             # choose actions according to the probabilities
-            action = np.random.choice(self.action_space.actions, p=action_values)
-            return action, action_values
+            return np.random.choice(self.action_space.actions, p=action_values)
         else:
             # take the action with the highest probability
-            action = np.argmax(action_values)
-            one_hot_action_probabilities = np.zeros(len(self.action_space.actions))
-            one_hot_action_probabilities[action] = 1
-
-            return action, one_hot_action_probabilities
+            return np.argmax(action_values)
 
     def get_control_param(self):
         return 0

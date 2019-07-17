@@ -44,10 +44,7 @@ class DuelingQHead(QHead):
             self.action_advantage = self.action_advantage - self.action_mean
 
         # merge to state-action value function Q
-        self.q_values = self.output = tf.add(self.state_value, self.action_advantage, name='output')
-
-        # used in batch-rl to estimate a probablity distribution over actions
-        self.softmax = self.add_softmax_with_temperature()
+        self.output = tf.add(self.state_value, self.action_advantage, name='output')
 
     def __str__(self):
         result = [

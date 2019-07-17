@@ -1,4 +1,3 @@
-from .q_head import QHead
 from .categorical_q_head import CategoricalQHead
 from .ddpg_actor_head import DDPGActor
 from .dnd_q_head import DNDQHead
@@ -8,16 +7,10 @@ from .naf_head import NAFHead
 from .policy_head import PolicyHead
 from .ppo_head import PPOHead
 from .ppo_v_head import PPOVHead
+from .q_head import QHead
 from .quantile_regression_q_head import QuantileRegressionQHead
 from .rainbow_q_head import RainbowQHead
 from .v_head import VHead
-from .acer_policy_head import ACERPolicyHead
-from .sac_head import SACPolicyHead
-from .sac_q_head import SACQHead
-from .classification_head import ClassificationHead
-from .cil_head import RegressionHead
-from .td3_v_head import TD3VHead
-from .ddpg_v_head import DDPGVHead
 
 __all__ = [
     'CategoricalQHead',
@@ -32,12 +25,5 @@ __all__ = [
     'QHead',
     'QuantileRegressionQHead',
     'RainbowQHead',
-    'VHead',
-    'ACERPolicyHead',
-    'SACPolicyHead',
-    'SACQHead',
-    'ClassificationHead',
-    'RegressionHead',
-    'TD3VHead'
-    'DDPGVHead'
+    'VHead'
 ]

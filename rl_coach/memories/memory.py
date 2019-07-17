@@ -58,6 +58,9 @@ class Memory(object):
     def get(self, index):
         raise NotImplementedError("")
 
+    def remove(self, index):
+        raise NotImplementedError("")
+
     def length(self):
         raise NotImplementedError("")
 

@@ -34,9 +34,6 @@ from rl_coach.spaces import SpacesDefinition, VectorObservationSpace, GoalsSpace
 from rl_coach.utils import Signal, force_list
 from rl_coach.utils import dynamic_import_and_instantiate_module_from_params
 from rl_coach.memories.backend.memory_impl import get_memory_backend
-from rl_coach.core_types import TimeTypes
-from rl_coach.off_policy_evaluators.ope_manager import OpeManager
-from rl_coach.core_types import PickledReplayBuffer, CsvDataset
 
 
 class Agent(AgentInterface):
@@ -45,15 +42,6 @@ class Agent(AgentInterface):
         :param agent_parameters: A AgentParameters class instance with all the agent parameters
         """
         super().__init__()
-        # use seed
-        if agent_parameters.task_parameters.seed is not None:
-            random.seed(agent_parameters.task_parameters.seed)
-            np.random.seed(agent_parameters.task_parameters.seed)
-        else:
-            # we need to seed the RNG since the different processes are initialized with the same parent seed
-            random.seed()
-            np.random.seed()
-
         self.ap = agent_parameters
         self.task_id = self.ap.task_parameters.task_index
         self.is_chief = self.task_id == 0
@@ -61,10 +49,10 @@ class Agent(AgentInterface):
                              and self.ap.memory.shared_memory
         if self.shared_memory:
             self.shared_memory_scratchpad = self.ap.task_parameters.shared_memory_scratchpad
+        self.name = agent_parameters.name
         self.parent = parent
         self.parent_level_manager = None
-        # TODO this needs to be sorted out. Why the duplicates for the agent's name?
-        self.full_name_id = agent_parameters.full_name_id = self.name = agent_parameters.name
+        self.full_name_id = agent_parameters.full_name_id = self.name
 
         if type(agent_parameters.task_parameters) == DistributedTaskParameters:
             screen.log_title("Creating agent - name: {} task id: {} (may take up to 30 seconds due to "
@@ -94,6 +82,11 @@ class Agent(AgentInterface):
 
                 if self.ap.memory.memory_backend_params.run_type != 'trainer':
                     self.memory.set_memory_backend(self.memory_backend)
+
+            if agent_parameters.memory.load_memory_from_file_path:
+                screen.log_title("Loading replay buffer from pickle. Pickle path: {}"
+                                 .format(agent_parameters.memory.load_memory_from_file_path))
+                self.memory.load(agent_parameters.memory.load_memory_from_file_path)
 
             if self.shared_memory and self.is_chief:
                 self.shared_memory_scratchpad.add(self.memory_lookup_name, self.memory)
@@ -154,7 +147,6 @@ class Agent(AgentInterface):
         self.total_steps_counter = 0
         self.running_reward = None
         self.training_iteration = 0
-        self.training_epoch = 0
         self.last_target_network_update_step = 0
         self.last_training_phase_step = 0
         self.current_episode = self.ap.current_episode = 0
@@ -192,9 +184,14 @@ class Agent(AgentInterface):
         self.discounted_return = self.register_signal('Discounted Return')
         if isinstance(self.in_action_space, GoalsSpace):
             self.distance_from_goal = self.register_signal('Distance From Goal', dump_one_value_per_step=True)
-
-        # batch rl
-        self.ope_manager = OpeManager() if self.ap.is_batch_rl_training else None
+        # use seed
+        if self.ap.task_parameters.seed is not None:
+            random.seed(self.ap.task_parameters.seed)
+            np.random.seed(self.ap.task_parameters.seed)
+        else:
+            # we need to seed the RNG since the different processes are initialized with the same parent seed
+            random.seed()
+            np.random.seed()
 
     @property
     def parent(self) -> 'LevelManager':
@@ -231,7 +228,6 @@ class Agent(AgentInterface):
             format(graph_name=self.parent_level_manager.parent_graph_manager.name,
                    level_name=self.parent_level_manager.name,
                    agent_full_id='.'.join(self.full_name_id.split('/')))
-        self.agent_logger.set_index_name(self.parent_level_manager.parent_graph_manager.time_metric.value.name)
         self.agent_logger.set_logger_filenames(self.ap.task_parameters.experiment_path, logger_prefix=logger_prefix,
                                                add_timestamp=True, task_id=self.task_id)
         if self.ap.visualization.dump_in_episode_signals:
@@ -249,38 +245,6 @@ class Agent(AgentInterface):
         self.output_filter.set_session(sess)
         self.pre_network_filter.set_session(sess)
         [network.set_session(sess) for network in self.networks.values()]
-        self.initialize_session_dependent_components()
-
-    def initialize_session_dependent_components(self):
-        """
-        Initialize components which require a session as part of their initialization.
-
-        :return: None
-        """
-
-        # Loading a memory from a CSV file, requires an input filter to filter through the data.
-        # The filter needs a session before it can be used.
-        if self.ap.memory.load_memory_from_file_path:
-            self.load_memory_from_file()
-
-    def load_memory_from_file(self):
-        """
-        Load memory transitions from a file.
-
-        :return: None
-        """
-
-        if isinstance(self.ap.memory.load_memory_from_file_path, PickledReplayBuffer):
-            screen.log_title("Loading a pickled replay buffer. Pickled file path: {}"
-                             .format(self.ap.memory.load_memory_from_file_path.filepath))
-            self.memory.load_pickled(self.ap.memory.load_memory_from_file_path.filepath)
-        elif isinstance(self.ap.memory.load_memory_from_file_path, CsvDataset):
-            screen.log_title("Loading a replay buffer from a CSV file. CSV file path: {}"
-                             .format(self.ap.memory.load_memory_from_file_path.filepath))
-            self.memory.load_csv(self.ap.memory.load_memory_from_file_path, self.input_filter)
-        else:
-            raise ValueError('Trying to load a replay buffer using an unsupported method - {}. '
-                             .format(self.ap.memory.load_memory_from_file_path))
 
     def register_signal(self, signal_name: str, dump_one_value_per_episode: bool=True,
                         dump_one_value_per_step: bool=False) -> Signal:
@@ -417,17 +381,13 @@ class Agent(AgentInterface):
             self.accumulated_shaped_rewards_across_evaluation_episodes = 0
             self.num_successes_across_evaluation_episodes = 0
             self.num_evaluation_episodes_completed = 0
-
-            # TODO verbosity was mistakenly removed from task_parameters on release 0.11.0, need to bring it back
-            # if self.ap.is_a_highest_level_agent or self.ap.task_parameters.verbosity == "high":
-            if self.ap.is_a_highest_level_agent:
+            if self.ap.is_a_highest_level_agent or self.ap.task_parameters.verbosity == "high":
                 screen.log_title("{}: Starting evaluation phase".format(self.name))
 
         elif ending_evaluation:
             # we write to the next episode, because it could be that the current episode was already written
             # to disk and then we won't write it again
-            self.agent_logger.set_current_time(self.get_current_time() + 1)
-
+            self.agent_logger.set_current_time(self.current_episode + 1)
             evaluation_reward = self.accumulated_rewards_across_evaluation_episodes / self.num_evaluation_episodes_completed
             self.agent_logger.create_signal_value(
                 'Evaluation Reward', evaluation_reward)
@@ -437,11 +397,9 @@ class Agent(AgentInterface):
             success_rate = self.num_successes_across_evaluation_episodes / self.num_evaluation_episodes_completed
             self.agent_logger.create_signal_value(
                 "Success Rate",
-                success_rate)
-
-            # TODO verbosity was mistakenly removed from task_parameters on release 0.11.0, need to bring it back
-            # if self.ap.is_a_highest_level_agent or self.ap.task_parameters.verbosity == "high":
-            if self.ap.is_a_highest_level_agent:
+                success_rate
+            )
+            if self.ap.is_a_highest_level_agent or self.ap.task_parameters.verbosity == "high":
                 screen.log_title("{}: Finished evaluation phase. Success rate = {}, Avg Total Reward = {}"
                                  .format(self.name, np.round(success_rate, 2), np.round(evaluation_reward, 2)))
 
@@ -514,11 +472,8 @@ class Agent(AgentInterface):
         :return: None
         """
         # log all the signals to file
-        current_time = self.get_current_time()
-        self.agent_logger.set_current_time(current_time)
+        self.agent_logger.set_current_time(self.current_episode)
         self.agent_logger.create_signal_value('Training Iter', self.training_iteration)
-        self.agent_logger.create_signal_value('Episode #', self.current_episode)
-        self.agent_logger.create_signal_value('Epoch', self.training_epoch)
         self.agent_logger.create_signal_value('In Heatup', int(self._phase == RunPhase.HEATUP))
         self.agent_logger.create_signal_value('ER #Transitions', self.call_memory('num_transitions'))
         self.agent_logger.create_signal_value('ER #Episodes', self.call_memory('length'))
@@ -531,18 +486,12 @@ class Agent(AgentInterface):
                                    if self._phase == RunPhase.TRAIN else np.nan)
 
         self.agent_logger.create_signal_value('Update Target Network', 0, overwrite=False)
-        self.agent_logger.update_wall_clock_time(current_time)
+        self.agent_logger.update_wall_clock_time(self.current_episode)
 
-        # The following signals are created with meaningful values only when an evaluation phase is completed.
-        # Creating with default NaNs for any HEATUP/TRAIN/TEST episode which is not the last in an evaluation phase
-        self.agent_logger.create_signal_value('Evaluation Reward', np.nan, overwrite=False)
-        self.agent_logger.create_signal_value('Shaped Evaluation Reward', np.nan, overwrite=False)
-        self.agent_logger.create_signal_value('Success Rate', np.nan, overwrite=False)
-        self.agent_logger.create_signal_value('Inverse Propensity Score', np.nan, overwrite=False)
-        self.agent_logger.create_signal_value('Direct Method Reward', np.nan, overwrite=False)
-        self.agent_logger.create_signal_value('Doubly Robust', np.nan, overwrite=False)
-        self.agent_logger.create_signal_value('Weighted Importance Sampling', np.nan, overwrite=False)
-        self.agent_logger.create_signal_value('Sequential Doubly Robust', np.nan, overwrite=False)
+        if self._phase != RunPhase.TEST:
+            self.agent_logger.create_signal_value('Evaluation Reward', np.nan, overwrite=False)
+            self.agent_logger.create_signal_value('Shaped Evaluation Reward', np.nan, overwrite=False)
+            self.agent_logger.create_signal_value('Success Rate', np.nan, overwrite=False)
 
         for signal in self.episode_signals:
             self.agent_logger.create_signal_value("{}/Mean".format(signal.name), signal.get_mean())
@@ -551,7 +500,8 @@ class Agent(AgentInterface):
             self.agent_logger.create_signal_value("{}/Min".format(signal.name), signal.get_min())
 
         # dump
-        if self.current_episode % self.ap.visualization.dump_signals_to_csv_every_x_episodes == 0:
+        if self.current_episode % self.ap.visualization.dump_signals_to_csv_every_x_episodes == 0 \
+                and self.current_episode > 0:
             self.agent_logger.dump_output_csv()
 
     def handle_episode_ended(self) -> None:
@@ -587,13 +537,10 @@ class Agent(AgentInterface):
                     self.total_reward_in_current_episode >= self.spaces.reward.reward_success_threshold:
                 self.num_successes_across_evaluation_episodes += 1
 
-        if self.ap.visualization.dump_csv and \
-                self.parent_level_manager.parent_graph_manager.time_metric == TimeTypes.EpisodeNumber:
+        if self.ap.visualization.dump_csv:
             self.update_log()
 
-        # TODO verbosity was mistakenly removed from task_parameters on release 0.11.0, need to bring it back
-        # if self.ap.is_a_highest_level_agent or self.ap.task_parameters.verbosity == "high":
-        if self.ap.is_a_highest_level_agent:
+        if self.ap.is_a_highest_level_agent or self.ap.task_parameters.verbosity == "high":
             self.log_to_screen()
 
     def reset_internal_state(self) -> None:
@@ -704,28 +651,18 @@ class Agent(AgentInterface):
         """
         loss = 0
         if self._should_train():
-            if self.ap.is_batch_rl_training:
-                # when training an agent for generating a dataset in batch-rl, we don't want it to be counted as part of
-                # the training epochs. we only care for training epochs in batch-rl anyway.
-                self.training_epoch += 1
             for network in self.networks.values():
                 network.set_is_training(True)
 
-            # At the moment we only support a single batch size for all the networks
-            networks_parameters = list(self.ap.network_wrappers.values())
-            assert all(net.batch_size == networks_parameters[0].batch_size for net in networks_parameters)
+            for training_step in range(self.ap.algorithm.num_consecutive_training_steps):
+                # TODO: this should be network dependent
+                network_parameters = list(self.ap.network_wrappers.values())[0]
 
-            batch_size = networks_parameters[0].batch_size
-
-            # we either go sequentially through the entire replay buffer in the batch RL mode,
-            # or sample randomly for the basic RL case.
-            training_schedule = self.call_memory('get_shuffled_training_data_generator', batch_size) if \
-                self.ap.is_batch_rl_training else [self.call_memory('sample', batch_size) for _ in
-                                      range(self.ap.algorithm.num_consecutive_training_steps)]
-
-            for batch in training_schedule:
                 # update counters
                 self.training_iteration += 1
+
+                # sample a batch and train on it
+                batch = self.call_memory('sample', network_parameters.batch_size)
                 if self.pre_network_filter is not None:
                     batch = self.pre_network_filter.filter(batch, update_internal_state=False, deep_copy=False)
 
@@ -736,19 +673,15 @@ class Agent(AgentInterface):
                     batch = Batch(batch)
                     total_loss, losses, unclipped_grads = self.learn_from_batch(batch)
                     loss += total_loss
-
                     self.unclipped_grads.add_sample(unclipped_grads)
 
-                    # TODO: this only deals with the main network (if exists), need to do the same for other networks
-                    #  for instance, for DDPG, the LR signal is currently not shown. Probably should be done through the
-                    #  network directly instead of here
+                    # TODO: the learning rate decay should be done through the network instead of here
                     # decay learning rate
-                    if 'main' in self.ap.network_wrappers and \
-                            self.ap.network_wrappers['main'].learning_rate_decay_rate != 0:
+                    if network_parameters.learning_rate_decay_rate != 0:
                         self.curr_learning_rate.add_sample(self.networks['main'].sess.run(
                             self.networks['main'].online_network.current_learning_rate))
                     else:
-                        self.curr_learning_rate.add_sample(networks_parameters[0].learning_rate)
+                        self.curr_learning_rate.add_sample(network_parameters.learning_rate)
 
                     if any([network.has_target for network in self.networks.values()]) \
                             and self._should_update_online_weights_to_target():
@@ -763,12 +696,6 @@ class Agent(AgentInterface):
 
                     if self.imitation:
                         self.log_to_screen()
-
-            if self.ap.visualization.dump_csv and \
-                    self.parent_level_manager.parent_graph_manager.time_metric == TimeTypes.Epoch:
-                # in BatchRL, or imitation learning, the agent never acts, so we have to get the stats out here.
-                # we dump the data out every epoch
-                self.update_log()
 
             for network in self.networks.values():
                 network.set_is_training(False)
@@ -812,11 +739,10 @@ class Agent(AgentInterface):
 
         return batches_dict
 
-    def act(self, action: Union[None, ActionType]=None) -> ActionInfo:
+    def act(self) -> ActionInfo:
         """
         Given the agents current knowledge, decide on the next action to apply to the environment
 
-        :param action: An action to take, overriding whatever the current policy is
         :return: An ActionInfo object, which contains the action and any additional info from the action decision process
         """
         if self.phase == RunPhase.TRAIN and self.ap.algorithm.num_consecutive_playing_steps.num_steps == 0:
@@ -829,28 +755,20 @@ class Agent(AgentInterface):
         self.current_episode_steps_counter += 1
 
         # decide on the action
-        if action is None:
-            if self.phase == RunPhase.HEATUP and not self.ap.algorithm.heatup_using_network_decisions:
-                # random action
-                action = self.spaces.action.sample_with_info()
+        if self.phase == RunPhase.HEATUP and not self.ap.algorithm.heatup_using_network_decisions:
+            # random action
+            self.last_action_info = self.spaces.action.sample_with_info()
+        else:
+            # informed action
+            if self.pre_network_filter is not None:
+                # before choosing an action, first use the pre_network_filter to filter out the current state
+                update_filter_internal_state = self.phase is not RunPhase.TEST
+                curr_state = self.run_pre_network_filter_for_inference(self.curr_state, update_filter_internal_state)
+
             else:
-                # informed action
-                if self.pre_network_filter is not None:
-                    # before choosing an action, first use the pre_network_filter to filter out the current state
-                    update_filter_internal_state = self.phase is not RunPhase.TEST
-                    curr_state = self.run_pre_network_filter_for_inference(self.curr_state, update_filter_internal_state)
+                curr_state = self.curr_state
+            self.last_action_info = self.choose_action(curr_state)
 
-                else:
-                    curr_state = self.curr_state
-                action = self.choose_action(curr_state)
-                assert isinstance(action, ActionInfo)
-
-        self.last_action_info = action
-
-        # output filters are explicitly applied after recording self.last_action_info. This is
-        # because the output filters may change the representation of the action so that the agent
-        # can no longer use the transition in it's replay buffer. It is possible that these filters
-        # could be moved to the environment instead, but they are here now for historical reasons.
         filtered_action_info = self.output_filter.filter(self.last_action_info)
 
         return filtered_action_info
@@ -932,35 +850,37 @@ class Agent(AgentInterface):
             # make agent specific changes to the transition if needed
             transition = self.update_transition_before_adding_to_replay_buffer(transition)
 
+            # merge the intrinsic reward in
+            if self.ap.algorithm.scale_external_reward_by_intrinsic_reward_value:
+                transition.reward = transition.reward * (1 + self.last_action_info.action_intrinsic_reward)
+            else:
+                transition.reward = transition.reward + self.last_action_info.action_intrinsic_reward
+
+            # sum up the total shaped reward
+            self.total_shaped_reward_in_current_episode += transition.reward
+            self.total_reward_in_current_episode += env_response.reward
+            self.shaped_reward.add_sample(transition.reward)
+            self.reward.add_sample(env_response.reward)
+
             # add action info to transition
             if type(self.parent).__name__ == 'CompositeAgent':
                 transition.add_info(self.parent.last_action_info.__dict__)
             else:
                 transition.add_info(self.last_action_info.__dict__)
 
-            self.total_reward_in_current_episode += env_response.reward
-            self.reward.add_sample(env_response.reward)
+            # create and store the transition
+            if self.phase in [RunPhase.TRAIN, RunPhase.HEATUP]:
+                # for episodic memories we keep the transitions in a local buffer until the episode is ended.
+                # for regular memories we insert the transitions directly to the memory
+                self.current_episode_buffer.insert(transition)
+                if not isinstance(self.memory, EpisodicExperienceReplay) \
+                        and not self.ap.algorithm.store_transitions_only_when_episodes_are_terminated:
+                    self.call_memory('store', transition)
 
-            return self.observe_transition(transition)
+            if self.ap.visualization.dump_in_episode_signals:
+                self.update_step_in_episode_log()
 
-    def observe_transition(self, transition):
-        # sum up the total shaped reward
-        self.total_shaped_reward_in_current_episode += transition.reward
-        self.shaped_reward.add_sample(transition.reward)
-
-        # create and store the transition
-        if self.phase in [RunPhase.TRAIN, RunPhase.HEATUP]:
-            # for episodic memories we keep the transitions in a local buffer until the episode is ended.
-            # for regular memories we insert the transitions directly to the memory
-            self.current_episode_buffer.insert(transition)
-            if not isinstance(self.memory, EpisodicExperienceReplay) \
-                    and not self.ap.algorithm.store_transitions_only_when_episodes_are_terminated:
-                self.call_memory('store', transition)
-
-        if self.ap.visualization.dump_in_episode_signals:
-            self.update_step_in_episode_log()
-
-        return transition.game_over
+            return transition.game_over
 
     def post_training_commands(self) -> None:
         """
@@ -1045,6 +965,60 @@ class Agent(AgentInterface):
         for network in self.networks.values():
             network.sync()
 
+    # TODO-remove - this is a temporary flow, used by the trainer worker, duplicated from observe() - need to create
+    #               an external trainer flow reusing the existing flow and methods [e.g. observe(), step(), act()]
+    def emulate_observe_on_trainer(self, transition: Transition) -> bool:
+        """
+        This emulates the observe using the transition obtained from the rollout worker on the training worker
+        in case of distributed training.
+        Given a response from the environment, distill the observation from it and store it for later use.
+        The response should be a dictionary containing the performed action, the new observation and measurements,
+        the reward, a game over flag and any additional information necessary.
+        :return:
+        """
+
+        # sum up the total shaped reward
+        self.total_shaped_reward_in_current_episode += transition.reward
+        self.total_reward_in_current_episode += transition.reward
+        self.shaped_reward.add_sample(transition.reward)
+        self.reward.add_sample(transition.reward)
+        
+        # create and store the transition
+        if self.phase in [RunPhase.TRAIN, RunPhase.HEATUP]:
+            # for episodic memories we keep the transitions in a local buffer until the episode is ended.
+            # for regular memories we insert the transitions directly to the memory
+            self.current_episode_buffer.insert(transition)
+            if not isinstance(self.memory, EpisodicExperienceReplay) \
+                    and not self.ap.algorithm.store_transitions_only_when_episodes_are_terminated:
+                self.call_memory('store', transition)
+
+        if self.ap.visualization.dump_in_episode_signals:
+            self.update_step_in_episode_log()
+
+        return transition.game_over
+
+    # TODO-remove - this is a temporary flow, used by the trainer worker, duplicated from observe() - need to create
+    #         an external trainer flow reusing the existing flow and methods [e.g. observe(), step(), act()]
+    def emulate_act_on_trainer(self, transition: Transition) -> ActionInfo:
+        """
+        This emulates the act using the transition obtained from the rollout worker on the training worker
+        in case of distributed training.
+        Given the agents current knowledge, decide on the next action to apply to the environment
+        :return: an action and a dictionary containing any additional info from the action decision process
+        """
+        if self.phase == RunPhase.TRAIN and self.ap.algorithm.num_consecutive_playing_steps.num_steps == 0:
+            # This agent never plays  while training (e.g. behavioral cloning)
+            return None
+
+        # count steps (only when training or if we are in the evaluation worker)
+        if self.phase != RunPhase.TEST or self.ap.task_parameters.evaluate_only:
+            self.total_steps_counter += 1
+        self.current_episode_steps_counter += 1
+
+        self.last_action_info = transition.action
+
+        return self.last_action_info
+
     def get_success_rate(self) -> float:
         return self.num_successes_across_evaluation_episodes / self.num_evaluation_episodes_completed
 
@@ -1052,7 +1026,7 @@ class Agent(AgentInterface):
         """
         Collect all of agent's network savers
         :param parent_path_suffix: path suffix of the parent of the agent
-        (could be name of level manager or composite agent)
+            (could be name of level manager or composite agent)
         :return: collection of all agent savers
         """
         parent_path_suffix = "{}.{}".format(parent_path_suffix, self.name)
@@ -1060,20 +1034,3 @@ class Agent(AgentInterface):
         for network in self.networks.values():
             savers.update(network.collect_savers(parent_path_suffix))
         return savers
-
-    def get_current_time(self):
-        pass
-        return {
-                TimeTypes.EpisodeNumber: self.current_episode,
-                TimeTypes.TrainingIteration: self.training_iteration,
-                TimeTypes.EnvironmentSteps: self.total_steps_counter,
-                TimeTypes.WallClockTime: self.agent_logger.get_current_wall_clock_time(),
-                TimeTypes.Epoch: self.training_epoch}[self.parent_level_manager.parent_graph_manager.time_metric]
-
-    def freeze_memory(self):
-        """
-        Shuffle episodes in the memory and freeze it to make sure that no extra data is being pushed anymore.
-        :return: None
-        """
-        self.call_memory('shuffle_episodes')
-        self.call_memory('freeze')

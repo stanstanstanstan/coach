@@ -17,6 +17,8 @@
 
 import math
 from types import FunctionType
+from typing import Any
+
 import tensorflow as tf
 
 from rl_coach.architectures import layers
@@ -25,9 +27,6 @@ from rl_coach.architectures.tensorflow_components import utils
 
 def batchnorm_activation_dropout(input_layer, batchnorm, activation_function, dropout_rate, is_training, name):
     layers = [input_layer]
-
-    # Rationale: passing a bool here will mean that batchnorm and or activation will never activate
-    assert not isinstance(is_training, bool)
 
     # batchnorm
     if batchnorm:
@@ -57,10 +56,9 @@ def batchnorm_activation_dropout(input_layer, batchnorm, activation_function, dr
 
 # define global dictionary for storing layer type to layer implementation mapping
 tf_layer_dict = dict()
-tf_layer_class_dict = dict()
 
 
-def reg_to_tf_instance(layer_type) -> FunctionType:
+def reg_to_tf(layer_type) -> FunctionType:
     """ function decorator that registers layer implementation
     :return: decorated function
     """
@@ -71,38 +69,15 @@ def reg_to_tf_instance(layer_type) -> FunctionType:
     return reg_impl_decorator
 
 
-def reg_to_tf_class(layer_type) -> FunctionType:
-    """ function decorator that registers layer type
-    :return: decorated function
-    """
-    def reg_impl_decorator(func):
-        assert layer_type not in tf_layer_class_dict
-        tf_layer_class_dict[layer_type] = func
-        return func
-    return reg_impl_decorator
-
-
 def convert_layer(layer):
     """
-    If layer instance is callable (meaning this is already a concrete TF class), return layer, otherwise convert to TF type
+    If layer is callable, return layer, otherwise convert to TF type
     :param layer: layer to be converted
     :return: converted layer if not callable, otherwise layer itself
     """
     if callable(layer):
         return layer
     return tf_layer_dict[type(layer)](layer)
-
-
-def convert_layer_class(layer_class):
-    """
-    If layer instance is callable, return layer, otherwise convert to TF type
-    :param layer: layer to be converted
-    :return: converted layer if not callable, otherwise layer itself
-    """
-    if hasattr(layer_class, 'to_tf_instance'):
-        return layer_class
-    else:
-        return tf_layer_class_dict[layer_class]()
 
 
 class Conv2d(layers.Conv2d):
@@ -120,17 +95,12 @@ class Conv2d(layers.Conv2d):
                                 strides=self.strides, data_format='channels_last', name=name)
 
     @staticmethod
-    @reg_to_tf_instance(layers.Conv2d)
-    def to_tf_instance(base: layers.Conv2d):
-            return Conv2d(
-                num_filters=base.num_filters,
-                kernel_size=base.kernel_size,
-                strides=base.strides)
-
-    @staticmethod
-    @reg_to_tf_class(layers.Conv2d)
-    def to_tf_class():
-        return Conv2d
+    @reg_to_tf(layers.Conv2d)
+    def to_tf(base: layers.Conv2d):
+        return Conv2d(
+            num_filters=base.num_filters,
+            kernel_size=base.kernel_size,
+            strides=base.strides)
 
 
 class BatchnormActivationDropout(layers.BatchnormActivationDropout):
@@ -151,45 +121,32 @@ class BatchnormActivationDropout(layers.BatchnormActivationDropout):
                                             is_training=is_training, name=name)
 
     @staticmethod
-    @reg_to_tf_instance(layers.BatchnormActivationDropout)
-    def to_tf_instance(base: layers.BatchnormActivationDropout):
-        return BatchnormActivationDropout, BatchnormActivationDropout(
-                batchnorm=base.batchnorm,
-                activation_function=base.activation_function,
-                dropout_rate=base.dropout_rate)
-
-    @staticmethod
-    @reg_to_tf_class(layers.BatchnormActivationDropout)
-    def to_tf_class():
-        return BatchnormActivationDropout
+    @reg_to_tf(layers.BatchnormActivationDropout)
+    def to_tf(base: layers.BatchnormActivationDropout):
+        return BatchnormActivationDropout(
+            batchnorm=base.batchnorm,
+            activation_function=base.activation_function,
+            dropout_rate=base.dropout_rate)
 
 
 class Dense(layers.Dense):
     def __init__(self, units: int):
         super(Dense, self).__init__(units=units)
 
-    def __call__(self, input_layer, name: str=None, kernel_initializer=None, bias_initializer=None,
-                 activation=None, is_training=None):
+    def __call__(self, input_layer, name: str=None, kernel_initializer=None, activation=None, is_training=None):
         """
         returns a tensorflow dense layer
         :param input_layer: previous layer
         :param name: layer name
         :return: dense layer
         """
-        if bias_initializer is None:
-            bias_initializer = tf.zeros_initializer()
         return tf.layers.dense(input_layer, self.units, name=name, kernel_initializer=kernel_initializer,
-                               activation=activation, bias_initializer=bias_initializer)
+                               activation=activation)
 
     @staticmethod
-    @reg_to_tf_instance(layers.Dense)
-    def to_tf_instance(base: layers.Dense):
+    @reg_to_tf(layers.Dense)
+    def to_tf(base: layers.Dense):
         return Dense(units=base.units)
-
-    @staticmethod
-    @reg_to_tf_class(layers.Dense)
-    def to_tf_class():
-        return Dense
 
 
 class NoisyNetDense(layers.NoisyNetDense):
@@ -202,8 +159,7 @@ class NoisyNetDense(layers.NoisyNetDense):
     def __init__(self, units: int):
         super(NoisyNetDense, self).__init__(units=units)
 
-    def __call__(self, input_layer, name: str, kernel_initializer=None, activation=None, is_training=None,
-                 bias_initializer=None):
+    def __call__(self, input_layer, name: str, kernel_initializer=None, activation=None, is_training=None):
         """
         returns a NoisyNet dense layer
         :param input_layer: previous layer
@@ -237,12 +193,10 @@ class NoisyNetDense(layers.NoisyNetDense):
             kernel_stddev_initializer = tf.random_uniform_initializer(-stddev * self.sigma0, stddev * self.sigma0)
         else:
             kernel_mean_initializer = kernel_stddev_initializer = kernel_initializer
-        if bias_initializer is None:
-            bias_initializer = tf.zeros_initializer()
         with tf.variable_scope(None, default_name=name):
             weight_mean = tf.get_variable('weight_mean', shape=(num_inputs, num_outputs),
                                           initializer=kernel_mean_initializer)
-            bias_mean = tf.get_variable('bias_mean', shape=(num_outputs,), initializer=bias_initializer)
+            bias_mean = tf.get_variable('bias_mean', shape=(num_outputs,), initializer=tf.zeros_initializer())
 
             weight_stddev = tf.get_variable('weight_stddev', shape=(num_inputs, num_outputs),
                                             initializer=kernel_stddev_initializer)
@@ -256,11 +210,6 @@ class NoisyNetDense(layers.NoisyNetDense):
         return activation(tf.matmul(input_layer, weight) + bias)
 
     @staticmethod
-    @reg_to_tf_instance(layers.NoisyNetDense)
-    def to_tf_instance(base: layers.NoisyNetDense):
+    @reg_to_tf(layers.NoisyNetDense)
+    def to_tf(base: layers.NoisyNetDense):
         return NoisyNetDense(units=base.units)
-
-    @staticmethod
-    @reg_to_tf_class(layers.NoisyNetDense)
-    def to_tf_class():
-        return NoisyNetDense

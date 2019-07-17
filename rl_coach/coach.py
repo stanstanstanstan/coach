@@ -18,6 +18,7 @@ sys.path.append('.')
 
 import copy
 from configparser import ConfigParser, Error
+from rl_coach.core_types import EnvironmentSteps
 import os
 from rl_coach import logger
 import traceback
@@ -29,13 +30,9 @@ import sys
 import json
 from rl_coach.base_parameters import Frameworks, VisualizationParameters, TaskParameters, DistributedTaskParameters, \
     RunType, DistributedCoachSynchronizationType
-from rl_coach.core_types import TotalStepsCounter, RunPhase, PlayingStepsType, TrainingSteps, EnvironmentEpisodes, \
-    EnvironmentSteps, StepMethod, Transition
 from multiprocessing import Process
 from multiprocessing.managers import BaseManager
 import subprocess
-from glob import glob
-
 from rl_coach.graph_managers.graph_manager import HumanPlayScheduleParameters, GraphManager
 from rl_coach.utils import list_all_presets, short_dynamic_import, get_open_port, SharedMemoryScratchPad, get_base_dir
 from rl_coach.graph_managers.basic_rl_graph_manager import BasicRLGraphManager
@@ -47,7 +44,7 @@ from rl_coach.data_stores.s3_data_store import S3DataStoreParameters
 from rl_coach.data_stores.nfs_data_store import NFSDataStoreParameters
 from rl_coach.data_stores.data_store_impl import get_data_store, construct_data_store_params
 from rl_coach.training_worker import training_worker
-from rl_coach.rollout_worker import rollout_worker
+from rl_coach.rollout_worker import rollout_worker, wait_for_checkpoint
 
 
 if len(set(failed_imports)) > 0:
@@ -67,8 +64,8 @@ def open_dashboard(experiment_path):
     dashboard_path = 'python {}/dashboard.py'.format(get_base_dir())
     cmd = "{} --experiment_dir {}".format(dashboard_path, experiment_path)
     screen.log_title("Opening dashboard - experiment path: {}".format(experiment_path))
-    # subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True, executable="bash")
-    subprocess.Popen(cmd, shell=True, executable="bash")
+    # subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=True, executable="/bin/bash")
+    subprocess.Popen(cmd, shell=True, executable="/bin/bash")
 
 
 def start_graph(graph_manager: 'GraphManager', task_parameters: 'TaskParameters'):
@@ -79,10 +76,8 @@ def start_graph(graph_manager: 'GraphManager', task_parameters: 'TaskParameters'
     graph_manager.create_graph(task_parameters)
 
     # let the adventure begin
-    if task_parameters.evaluate_only is not None:
-        steps_to_evaluate = task_parameters.evaluate_only if task_parameters.evaluate_only > 0 \
-            else sys.maxsize
-        graph_manager.evaluate(EnvironmentSteps(steps_to_evaluate))
+    if task_parameters.evaluate_only:
+        graph_manager.evaluate(EnvironmentSteps(sys.maxsize))
     else:
         graph_manager.improve()
     graph_manager.close()
@@ -104,21 +99,19 @@ def handle_distributed_coach_tasks(graph_manager, args, task_parameters):
         data_store_params.checkpoint_dir = ckpt_inside_container
         graph_manager.data_store_params = data_store_params
 
-    data_store = None
-    if args.data_store_params:
-        data_store = get_data_store(data_store_params)
-
     if args.distributed_coach_run_type == RunType.TRAINER:
         task_parameters.checkpoint_save_dir = ckpt_inside_container
         training_worker(
             graph_manager=graph_manager,
-            task_parameters=task_parameters,
-            data_store=data_store,
-            is_multi_node_test=args.is_multi_node_test
+            task_parameters=task_parameters
         )
 
     if args.distributed_coach_run_type == RunType.ROLLOUT_WORKER:
-        task_parameters.checkpoint_restore_path = ckpt_inside_container
+        task_parameters.checkpoint_restore_dir = ckpt_inside_container
+
+        data_store = None
+        if args.data_store_params:
+            data_store = get_data_store(data_store_params)
 
         rollout_worker(
             graph_manager=graph_manager,
@@ -171,34 +164,32 @@ def handle_distributed_coach_orchestrator(args):
                                                 memory_backend_parameters=memory_backend_params,
                                                 data_store_params=ds_params_instance)
     orchestrator = Kubernetes(orchestration_params)
-    if not orchestrator.setup(args.checkpoint_restore_dir):
+    if not orchestrator.setup():
         print("Could not setup.")
-        return 1
+        return
 
     if orchestrator.deploy_trainer():
         print("Successfully deployed trainer.")
     else:
         print("Could not deploy trainer.")
-        return 1
+        return
 
     if orchestrator.deploy_worker():
         print("Successfully deployed rollout worker(s).")
     else:
         print("Could not deploy rollout worker(s).")
-        return 1
+        return
 
     if args.dump_worker_logs:
         screen.log_title("Dumping rollout worker logs in: {}".format(args.experiment_path))
         orchestrator.worker_logs(path=args.experiment_path)
 
-    exit_code = 1
     try:
-        exit_code = orchestrator.trainer_logs()
+        orchestrator.trainer_logs()
     except KeyboardInterrupt:
         pass
 
     orchestrator.undeploy()
-    return exit_code
 
 
 class CoachLauncher(object):
@@ -261,7 +252,7 @@ class CoachLauncher(object):
                 graph_manager.env_params.level = args.level
 
         # set the seed for the environment
-        if args.seed is not None and graph_manager.env_params is not None:
+        if args.seed is not None:
             graph_manager.env_params.seed = args.seed
 
         # visualization
@@ -317,7 +308,7 @@ class CoachLauncher(object):
 
         return preset
 
-    def get_config_args(self, parser: argparse.ArgumentParser, arguments=None) -> argparse.Namespace:
+    def get_config_args(self, parser: argparse.ArgumentParser) -> argparse.Namespace:
         """
         Returns a Namespace object with all the user-specified configuration options needed to launch.
         This implementation uses argparse to take arguments from the CLI, but this can be over-ridden by
@@ -330,21 +321,17 @@ class CoachLauncher(object):
 
         :param parser: a parser object which implicitly defines the format of the Namespace that
                        is expected to be returned.
-        :param arguments: command line arguments
         :return: the parsed arguments as a Namespace
         """
-        if arguments is None:
-            args = parser.parse_args()
-        else:
-            args = parser.parse_args(arguments)
+        args = parser.parse_args()
 
         if args.nocolor:
             screen.set_use_colors(False)
 
         # if no arg is given
-        if (len(sys.argv) == 1 and arguments is None) or (arguments is not None and len(arguments) <= 2):
+        if len(sys.argv) == 1:
             parser.print_help()
-            sys.exit(1)
+            sys.exit(0)
 
         # list available presets
         if args.list:
@@ -400,13 +387,7 @@ class CoachLauncher(object):
 
         # validate the checkpoints args
         if args.checkpoint_restore_dir is not None and not os.path.exists(args.checkpoint_restore_dir):
-            # If distributed trainer, the checkpoint dir is not yet available so skipping the check in that case.
-            if not (args.distributed_coach and args.distributed_coach_run_type in [RunType.TRAINER, RunType.ROLLOUT_WORKER]):
-                screen.error("The requested checkpoint folder to load from does not exist.")
-
-        # validate the checkpoints args
-        if args.checkpoint_restore_file is not None and not glob(args.checkpoint_restore_file + '*'):
-            screen.error("The requested checkpoint file to load from does not exist.")
+            screen.error("The requested checkpoint folder to load from does not exist.")
 
         # no preset was given. check if the user requested to play some environment on its own
         if args.preset is None and args.play and not args.environment_type:
@@ -422,7 +403,7 @@ class CoachLauncher(object):
 
         # get experiment name and path
         args.experiment_name = logger.get_experiment_name(args.experiment_name)
-        args.experiment_path = logger.get_experiment_path(args.experiment_name, args.experiment_path)
+        args.experiment_path = logger.get_experiment_path(args.experiment_name)
 
         if args.play and args.num_workers > 1:
             screen.warning("Playing the game as a human is only available with a single worker. "
@@ -455,11 +436,7 @@ class CoachLauncher(object):
                             action='store_true')
         parser.add_argument('-e', '--experiment_name',
                             help="(string) Experiment name to be used to store the results.",
-                            default=None,
-                            type=str)
-        parser.add_argument('-ep', '--experiment_path',
-                            help="(string) Path to experiments folder.",
-                            default=None,
+                            default='',
                             type=str)
         parser.add_argument('-r', '--render',
                             help="(flag) Render environment",
@@ -477,7 +454,7 @@ class CoachLauncher(object):
                                  "effect and the CPU will be used either way.",
                             action='store_true')
         parser.add_argument('-ew', '--evaluation_worker',
-                            help="(flag) If multiple workers are used, add an evaluation worker as well which will "
+                            help="(int) If multiple workers are used, add an evaluation worker as well which will "
                                  "evaluate asynchronously and independently during the training. NOTE: this worker will "
                                  "ignore the evaluation settings in the preset's ScheduleParams.",
                             action='store_true')
@@ -486,13 +463,9 @@ class CoachLauncher(object):
                                  "This option will save a replay buffer with the game play.",
                             action='store_true')
         parser.add_argument('--evaluate',
-                            help="(int) Run evaluation only, for at least the given number of steps (note that complete "
-                                "episodes are evaluated). This is a convenient way to disable training in order "
-                                "to evaluate an existing checkpoint. If value is 0, or no value is provided, "
-                                "evaluation will run for an infinite number of steps.",
-                            nargs='?',
-                            const=0,
-                            type=int)
+                            help="(flag) Run evaluation only. This is a convenient way to disable "
+                                 "training in order to evaluate an existing checkpoint.",
+                            action='store_true')
         parser.add_argument('-v', '--verbosity',
                             help="(flag) Sets the verbosity level of Coach print outs. Can be either low or high.",
                             default="low",
@@ -511,9 +484,6 @@ class CoachLauncher(object):
         parser.add_argument('-crd', '--checkpoint_restore_dir',
                             help='(string) Path to a folder containing a checkpoint to restore the model from.',
                             type=str)
-        parser.add_argument('-crf', '--checkpoint_restore_file',
-                            help='(string) Path to a checkpoint file to restore the model from.',
-                            type=str)
         parser.add_argument('-dg', '--dump_gifs',
                             help="(flag) Enable the gif saving functionality.",
                             action='store_true')
@@ -522,6 +492,14 @@ class CoachLauncher(object):
                             action='store_true')
         parser.add_argument('-et', '--environment_type',
                             help="(string) Choose an environment type class to override on top of the selected preset.",
+                            default=None,
+                            type=str)
+        parser.add_argument('-ept', '--exploration_policy_type',
+                            help="(string) Choose an exploration policy type class to override on top of the selected "
+                                 "preset."
+                                 "If no preset is defined, a preset can be set from the command-line by combining settings "
+                                 "which are set by using --agent_type, --experiment_type, --environemnt_type"
+                            ,
                             default=None,
                             type=str)
         parser.add_argument('-lvl', '--level',
@@ -535,8 +513,7 @@ class CoachLauncher(object):
                                  " the selected preset (or on top of the command-line assembled one). "
                                  "Whenever a parameter value is a string, it should be inputted as '\\\"string\\\"'. "
                                  "For ex.: "
-                                 "\"visualization_parameters.render=False; heatup_steps=EnvironmentSteps(1000);"
-                                 "improve_steps=TrainingSteps(100000); optimizer='rmsprop'\"",
+                                 "\"visualization.render=False; num_training_iterations=500; optimizer='rmsprop'\"",
                             default=None,
                             type=str)
         parser.add_argument('--print_networks_summary',
@@ -592,38 +569,18 @@ class CoachLauncher(object):
         parser.add_argument('--dump_worker_logs',
                             help="(flag) Only used in distributed coach. If set, the worker logs are saved in the experiment dir",
                             action='store_true')
-        parser.add_argument('--is_multi_node_test',
-                            help=argparse.SUPPRESS,
-                            action='store_true')
 
         return parser
 
     def run_graph_manager(self, graph_manager: 'GraphManager', args: argparse.Namespace):
-        task_parameters = self.create_task_parameters(graph_manager, args)
-
-        if args.distributed_coach and args.distributed_coach_run_type != RunType.ORCHESTRATOR:
-            handle_distributed_coach_tasks(graph_manager, args, task_parameters)
-            return
-
-        # Single-threaded runs
-        if args.num_workers == 1:
-            self.start_single_threaded(task_parameters, graph_manager, args)
-        else:
-            self.start_multi_threaded(graph_manager, args)
-
-    @staticmethod
-    def create_task_parameters(graph_manager: 'GraphManager', args: argparse.Namespace):
         if args.distributed_coach and not graph_manager.agent_params.algorithm.distributed_coach_synchronization_type:
-            screen.error(
-                "{} algorithm is not supported using distributed Coach.".format(graph_manager.agent_params.algorithm))
+            screen.error("{} algorithm is not supported using distributed Coach.".format(graph_manager.agent_params.algorithm))
 
         if args.distributed_coach and args.checkpoint_save_secs and graph_manager.agent_params.algorithm.distributed_coach_synchronization_type == DistributedCoachSynchronizationType.SYNC:
-            screen.warning(
-                "The --checkpoint_save_secs or -s argument will be ignored as SYNC distributed coach sync type is used. Checkpoint will be saved every training iteration.")
+            screen.warning("The --checkpoint_save_secs or -s argument will be ignored as SYNC distributed coach sync type is used. Checkpoint will be saved every training iteration.")
 
         if args.distributed_coach and not args.checkpoint_save_secs and graph_manager.agent_params.algorithm.distributed_coach_synchronization_type == DistributedCoachSynchronizationType.ASYNC:
-            screen.error(
-                "Distributed coach with ASYNC distributed coach sync type requires --checkpoint_save_secs or -s.")
+            screen.error("Distributed coach with ASYNC distributed coach sync type requires --checkpoint_save_secs or -s.")
 
         # Intel optimized TF seems to run significantly faster when limiting to a single OMP thread.
         # This will not affect GPU runs.
@@ -638,19 +595,6 @@ class CoachLauncher(object):
             atexit.register(logger.summarize_experiment)
             screen.change_terminal_title(args.experiment_name)
 
-        if args.checkpoint_restore_dir is not None and args.checkpoint_restore_file is not None:
-            raise ValueError("Only one of the checkpoint_restore_dir and checkpoint_restore_file arguments can be used"
-                             " simulatenously.")
-        checkpoint_restore_path = args.checkpoint_restore_dir if args.checkpoint_restore_dir \
-            else args.checkpoint_restore_file
-
-        # open dashboard
-        if args.open_dashboard:
-            open_dashboard(args.experiment_path)
-
-        if args.distributed_coach and args.distributed_coach_run_type == RunType.ORCHESTRATOR:
-            exit(handle_distributed_coach_orchestrator(args))
-
         task_parameters = TaskParameters(
             framework_type=args.framework,
             evaluate_only=args.evaluate,
@@ -658,21 +602,35 @@ class CoachLauncher(object):
             seed=args.seed,
             use_cpu=args.use_cpu,
             checkpoint_save_secs=args.checkpoint_save_secs,
-            checkpoint_restore_path=checkpoint_restore_path,
+            checkpoint_restore_dir=args.checkpoint_restore_dir,
             checkpoint_save_dir=args.checkpoint_save_dir,
             export_onnx_graph=args.export_onnx_graph,
             apply_stop_condition=args.apply_stop_condition
         )
 
-        return task_parameters
+        # open dashboard
+        if args.open_dashboard:
+            open_dashboard(args.experiment_path)
 
-    @staticmethod
-    def start_single_threaded(task_parameters, graph_manager: 'GraphManager', args: argparse.Namespace):
+        if args.distributed_coach and args.distributed_coach_run_type != RunType.ORCHESTRATOR:
+            handle_distributed_coach_tasks(graph_manager, args, task_parameters)
+            return
+
+        if args.distributed_coach and args.distributed_coach_run_type == RunType.ORCHESTRATOR:
+            handle_distributed_coach_orchestrator(args)
+            return
+
+        # Single-threaded runs
+        if args.num_workers == 1:
+            self.start_single_threaded(task_parameters, graph_manager, args)
+        else:
+            self.start_multi_threaded(graph_manager, args)
+
+    def start_single_threaded(self, task_parameters, graph_manager: 'GraphManager', args: argparse.Namespace):
         # Start the training or evaluation
         start_graph(graph_manager=graph_manager, task_parameters=task_parameters)
 
-    @staticmethod
-    def start_multi_threaded(graph_manager: 'GraphManager', args: argparse.Namespace):
+    def start_multi_threaded(self, graph_manager: 'GraphManager', args: argparse.Namespace):
         total_tasks = args.num_workers
         if args.evaluation_worker:
             total_tasks += 1
@@ -688,10 +646,6 @@ class CoachLauncher(object):
         comm_manager.start()
         shared_memory_scratchpad = comm_manager.SharedMemoryScratchPad()
 
-        if args.checkpoint_restore_file:
-            raise ValueError("Multi-Process runs only support restoring checkpoints from a directory, "
-                             "and not from a file. ")
-
         def start_distributed_task(job_type, task_index, evaluation_worker=False,
                                    shared_memory_scratchpad=shared_memory_scratchpad):
             task_parameters = DistributedTaskParameters(
@@ -700,7 +654,7 @@ class CoachLauncher(object):
                 worker_hosts=worker_hosts,
                 job_type=job_type,
                 task_index=task_index,
-                evaluate_only=0 if evaluation_worker else None, # 0 value for evaluation worker as it should run infinitely
+                evaluate_only=evaluation_worker,
                 use_cpu=args.use_cpu,
                 num_tasks=total_tasks,  # training tasks + 1 evaluation task
                 num_training_tasks=args.num_workers,
@@ -708,7 +662,7 @@ class CoachLauncher(object):
                 shared_memory_scratchpad=shared_memory_scratchpad,
                 seed=args.seed+task_index if args.seed is not None else None,  # each worker gets a different seed
                 checkpoint_save_secs=args.checkpoint_save_secs,
-                checkpoint_restore_path=args.checkpoint_restore_dir,  # MonitoredTrainingSession only supports a dir
+                checkpoint_restore_dir=args.checkpoint_restore_dir,
                 checkpoint_save_dir=args.checkpoint_save_dir,
                 export_onnx_graph=args.export_onnx_graph,
                 apply_stop_condition=args.apply_stop_condition
@@ -727,7 +681,6 @@ class CoachLauncher(object):
         # wait a bit before spawning the non chief workers in order to make sure the session is already created
         workers = []
         workers.append(start_distributed_task("worker", 0))
-
         time.sleep(2)
         for task_index in range(1, args.num_workers):
             workers.append(start_distributed_task("worker", task_index))
@@ -740,34 +693,6 @@ class CoachLauncher(object):
         [w.join() for w in workers]
         if args.evaluation_worker:
             evaluation_worker.terminate()
-
-
-class CoachInterface(CoachLauncher):
-    """
-        This class is used as an interface to use coach as library. It can take any of the command line arguments
-        (with the respective names) as arguments to the class.
-    """
-    def __init__(self, **kwargs):
-        parser = self.get_argument_parser()
-
-        arguments = []
-        for key in kwargs:
-            arguments.append('--' + key)
-            arguments.append(str(kwargs[key]))
-
-        if '--experiment_name' not in arguments:
-            arguments.append('--experiment_name')
-            arguments.append('')
-        self.args = self.get_config_args(parser, arguments)
-
-        self.graph_manager = self.get_graph_manager_from_args(self.args)
-
-        if self.args.num_workers == 1:
-            task_parameters = self.create_task_parameters(self.graph_manager, self.args)
-            self.graph_manager.create_graph(task_parameters)
-
-    def run(self):
-        self.run_graph_manager(self.graph_manager, self.args)
 
 
 def main():

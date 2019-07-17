@@ -147,9 +147,9 @@ class PolicyOptimizationAgent(Agent):
         if isinstance(self.spaces.action, DiscreteActionSpace):
             # DISCRETE
             action_probabilities = np.array(action_values).squeeze()
-            action, _ = self.exploration_policy.get_action(action_probabilities)
+            action = self.exploration_policy.get_action(action_probabilities)
             action_info = ActionInfo(action=action,
-                                     all_action_probabilities=action_probabilities)
+                                     action_probability=action_probabilities[action])
 
             self.entropy.add_sample(-np.sum(action_probabilities * np.log(action_probabilities + eps)))
         elif isinstance(self.spaces.action, BoxActionSpace):

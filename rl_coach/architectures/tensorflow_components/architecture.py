@@ -102,7 +102,10 @@ class TensorFlowArchitecture(Architecture):
             self.global_step = tf.train.get_or_create_global_step()
 
             # build the network
-            self.weights = self.get_model()
+            self.get_model()
+
+            # model weights
+            self.weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.full_name)
 
             # create the placeholder for the assigning gradients and some tensorboard summaries for the weights
             for idx, var in enumerate(self.weights):
@@ -121,6 +124,12 @@ class TensorFlowArchitecture(Architecture):
 
             # gradients ops
             self._create_gradient_ops()
+
+            # L2 regularization
+            if self.network_parameters.l2_regularization != 0:
+                self.l2_regularization = [tf.add_n([tf.nn.l2_loss(v) for v in self.weights])
+                                          * self.network_parameters.l2_regularization]
+                tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, self.l2_regularization)
 
             self.inc_step = self.global_step.assign_add(1)
 
@@ -141,13 +150,11 @@ class TensorFlowArchitecture(Architecture):
             # set the fetches for training
             self._set_initial_fetch_list()
 
-    def get_model(self) -> List:
+    def get_model(self) -> None:
         """
         Constructs the model using `network_parameters` and sets `input_embedders`, `middleware`,
         `output_heads`, `outputs`, `losses`, `total_loss`, `adaptive_learning_rate_scheme`,
-        `current_learning_rate`, and `optimizer`.
-
-        :return: A list of the model's weights
+        `current_learning_rate`, and `optimizer`
         """
         raise NotImplementedError
 
@@ -203,6 +210,7 @@ class TensorFlowArchitecture(Architecture):
             self._create_gradient_accumulators()
 
         # gradients of the outputs w.r.t. the inputs
+        # at the moment, this is only used by ddpg
         self.gradients_wrt_inputs = [{name: tf.gradients(output, input_ph) for name, input_ph in
                                       self.inputs.items()} for output in self.outputs]
         self.gradients_weights_ph = [tf.placeholder('float32', self.outputs[i].shape, 'output_gradient_weights')
@@ -270,11 +278,8 @@ class TensorFlowArchitecture(Architecture):
         elif self.network_is_trainable:
             # not any of the above but is trainable? -> create an operation for applying the gradients to
             # this network weights
-            update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS, scope=self.full_name)
-
-            with tf.control_dependencies(update_ops):
-                self.update_weights_from_batch_gradients = self.optimizer.apply_gradients(
-                    zip(self.weights_placeholders, self.weights), global_step=self.global_step)
+            self.update_weights_from_batch_gradients = self.optimizer.apply_gradients(
+                zip(self.weights_placeholders, self.weights), global_step=self.global_step)
 
     def set_session(self, sess):
         self.sess = sess
@@ -345,7 +350,7 @@ class TensorFlowArchitecture(Architecture):
                 importance_weight = np.ones(target_ph.shape[0])
             else:
                 importance_weight = importance_weights[placeholder_idx]
-            importance_weight = np.reshape(importance_weight, (-1,) + (1,) * (len(target_ph.shape) - 1))
+            importance_weight = np.reshape(importance_weight, (-1,) + (1,)*(len(target_ph.shape)-1))
 
             feed_dict[self.importance_weights[placeholder_idx]] = importance_weight
 
@@ -417,16 +422,13 @@ class TensorFlowArchitecture(Architecture):
 
         return feed_dict
 
-    def apply_and_reset_gradients(self, gradients, scaler=1., additional_inputs=None):
+    def apply_and_reset_gradients(self, gradients, scaler=1.):
         """
         Applies the given gradients to the network weights and resets the accumulation placeholder
         :param gradients: The gradients to use for the update
         :param scaler: A scaling factor that allows rescaling the gradients before applying them
-        :param additional_inputs: optional additional inputs required for when applying the gradients (e.g. batchnorm's
-                                  update ops also requires the inputs)
-
         """
-        self.apply_gradients(gradients, scaler, additional_inputs=additional_inputs)
+        self.apply_gradients(gradients, scaler)
         self.reset_accumulated_gradients()
 
     def wait_for_all_workers_to_lock(self, lock: str, include_only_training_workers: bool=False):
@@ -466,16 +468,13 @@ class TensorFlowArchitecture(Architecture):
         self.wait_for_all_workers_to_lock('release', include_only_training_workers=include_only_training_workers)
         self.sess.run(self.release_init)
 
-    def apply_gradients(self, gradients, scaler=1., additional_inputs=None):
+    def apply_gradients(self, gradients, scaler=1.):
         """
         Applies the given gradients to the network weights
         :param gradients: The gradients to use for the update
         :param scaler: A scaling factor that allows rescaling the gradients before applying them.
                        The gradients will be MULTIPLIED by this factor
-        :param additional_inputs: optional additional inputs required for when applying the gradients (e.g. batchnorm's
-                                  update ops also requires the inputs)
         """
-
         if self.network_parameters.async_training or not isinstance(self.ap.task_parameters, DistributedTaskParameters):
             if hasattr(self, 'global_step') and not self.network_is_local:
                 self.sess.run(self.inc_step)
@@ -512,8 +511,6 @@ class TensorFlowArchitecture(Architecture):
                 # async distributed training / distributed training with independent optimizer
                 #  / non-distributed training - just apply the gradients
                 feed_dict = dict(zip(self.weights_placeholders, gradients))
-                if additional_inputs is not None:
-                    feed_dict = {**feed_dict, **self.create_feed_dict(additional_inputs)}
                 self.sess.run(self.update_weights_from_batch_gradients, feed_dict=feed_dict)
 
             # release barrier

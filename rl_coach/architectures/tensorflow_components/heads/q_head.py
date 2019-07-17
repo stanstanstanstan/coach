@@ -26,7 +26,7 @@ from rl_coach.spaces import SpacesDefinition, BoxActionSpace, DiscreteActionSpac
 class QHead(Head):
     def __init__(self, agent_parameters: AgentParameters, spaces: SpacesDefinition, network_name: str,
                  head_idx: int = 0, loss_weight: float = 1., is_local: bool = True, activation_function: str='relu',
-                 dense_layer=Dense, output_bias_initializer=None):
+                 dense_layer=Dense):
         super().__init__(agent_parameters, spaces, network_name, head_idx, loss_weight, is_local, activation_function,
                          dense_layer=dense_layer)
         self.name = 'q_values_head'
@@ -46,24 +46,12 @@ class QHead(Head):
         else:
             self.loss_type = tf.losses.mean_squared_error
 
-        self.output_bias_initializer = output_bias_initializer
-
     def _build_module(self, input_layer):
         # Standard Q Network
-        self.q_values = self.output = self.dense_layer(self.num_actions)\
-            (input_layer, name='output', bias_initializer=self.output_bias_initializer)
-
-        # used in batch-rl to estimate a probablity distribution over actions
-        self.softmax = self.add_softmax_with_temperature()
+        self.output = self.dense_layer(self.num_actions)(input_layer, name='output')
 
     def __str__(self):
         result = [
             "Dense (num outputs = {})".format(self.num_actions)
         ]
         return '\n'.join(result)
-
-    def add_softmax_with_temperature(self):
-        temperature = self.ap.network_wrappers[self.network_name].softmax_temperature
-        temperature_scaled_outputs = self.q_values / temperature
-        return tf.nn.softmax(temperature_scaled_outputs, name="softmax")
-

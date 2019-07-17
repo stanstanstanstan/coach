@@ -15,30 +15,28 @@
 #
 
 import tensorflow as tf
-import numpy as np
-from rl_coach.architectures.tensorflow_components.heads import QHead
+
 from rl_coach.architectures.tensorflow_components.layers import Dense
 
+from rl_coach.architectures.tensorflow_components.heads.head import Head
 from rl_coach.base_parameters import AgentParameters
+from rl_coach.core_types import QActionStateValue
 from rl_coach.spaces import SpacesDefinition
 
 
-class CategoricalQHead(QHead):
+class CategoricalQHead(Head):
     def __init__(self, agent_parameters: AgentParameters, spaces: SpacesDefinition, network_name: str,
                  head_idx: int = 0, loss_weight: float = 1., is_local: bool = True, activation_function: str ='relu',
-                 dense_layer=Dense, output_bias_initializer=None):
+                 dense_layer=Dense):
         super().__init__(agent_parameters, spaces, network_name, head_idx, loss_weight, is_local, activation_function,
-                         dense_layer=dense_layer, output_bias_initializer=output_bias_initializer)
+                         dense_layer=dense_layer)
         self.name = 'categorical_dqn_head'
         self.num_actions = len(self.spaces.action.actions)
         self.num_atoms = agent_parameters.algorithm.atoms
-        self.z_values = tf.cast(tf.constant(np.linspace(self.ap.algorithm.v_min, self.ap.algorithm.v_max,
-                                                        self.ap.algorithm.atoms), dtype=tf.float32), dtype=tf.float64)
-        self.loss_type = []
+        self.return_type = QActionStateValue
 
     def _build_module(self, input_layer):
-        values_distribution = self.dense_layer(self.num_actions * self.num_atoms)\
-            (input_layer, name='output', bias_initializer=self.output_bias_initializer)
+        values_distribution = self.dense_layer(self.num_actions * self.num_atoms)(input_layer, name='output')
         values_distribution = tf.reshape(values_distribution, (tf.shape(values_distribution)[0], self.num_actions,
                                                                self.num_atoms))
         # softmax on atoms dimension
@@ -50,11 +48,6 @@ class CategoricalQHead(QHead):
         self.target = self.distributions
         self.loss = tf.nn.softmax_cross_entropy_with_logits(labels=self.target, logits=values_distribution)
         tf.losses.add_loss(self.loss)
-
-        self.q_values = tf.tensordot(tf.cast(self.output, tf.float64), self.z_values, 1)
-
-        # used in batch-rl to estimate a probablity distribution over actions
-        self.softmax = self.add_softmax_with_temperature()
 
     def __str__(self):
         result = [
