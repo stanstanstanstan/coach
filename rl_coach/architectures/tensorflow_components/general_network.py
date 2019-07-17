@@ -173,6 +173,11 @@ class GeneralTensorFlowNetwork(TensorFlowArchitecture):
         allowed_inputs["action"] = copy.copy(self.spaces.action)
         allowed_inputs["goal"] = copy.copy(self.spaces.goal)
 
+
+
+        print('6666666')
+        print(allowed_inputs)
+
         if input_name not in allowed_inputs.keys():
             raise ValueError("The key for the input embedder ({}) must match one of the following keys: {}"
                              .format(input_name, allowed_inputs.keys()))
@@ -246,6 +251,12 @@ class GeneralTensorFlowNetwork(TensorFlowArchitecture):
                 ####################
 
                 state_embedding = []
+
+
+                print('77777777')
+                print(self.network_parameters.input_embedders_parameters)
+
+
                 for input_name in sorted(self.network_parameters.input_embedders_parameters):
                     input_type = self.network_parameters.input_embedders_parameters[input_name]
                     # get the class of the input embedder

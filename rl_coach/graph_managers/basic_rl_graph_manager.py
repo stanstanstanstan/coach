@@ -50,6 +50,10 @@ class BasicRLGraphManager(GraphManager):
         env = short_dynamic_import(self.env_params.path)(**self.env_params.__dict__,
                                                          visualization_parameters=self.visualization_parameters)
 
+
+        print('222222222')
+        print(env)
+
         # agent loading
         self.agent_params.task_parameters = task_parameters  # TODO: this should probably be passed in a different way
         self.agent_params.name = "agent"

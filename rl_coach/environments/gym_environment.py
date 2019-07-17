@@ -422,6 +422,12 @@ class GymEnvironment(Environment):
 
         self.target_success_rate = target_success_rate
 
+
+        print('1111111')
+        print(state_space)
+        print(state_space.sub_spaces)
+
+
     def _wrap_state(self, state):
         if not isinstance(self.env.observation_space, gym.spaces.Dict):
             return {'observation': state}

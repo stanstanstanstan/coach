@@ -296,6 +296,11 @@ class Agent(AgentInterface):
             self.spaces.goal = self.in_action_space
             self.spaces.goal.set_target_space(self.spaces.state[self.spaces.goal.goal_name])
 
+
+
+        print('444444444')
+        print(self.spaces.state)
+
         self.init_environment_dependent_modules()
 
     def create_networks(self) -> Dict[str, NetworkWrapper]:

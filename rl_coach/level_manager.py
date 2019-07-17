@@ -149,6 +149,11 @@ class LevelManager(EnvironmentInterface):
                                   goal=self.real_environment.goal_space,  # in HRL the agent might want to override this
                                   action=action_space,
                                   reward=self.real_environment.reward_space)
+
+        print('3333333333')
+        print(spaces)
+
+
         [agent.set_environment_parameters(spaces) for agent in self.agents.values()]
 
     def setup_logger(self) -> None:
