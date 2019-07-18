@@ -25,11 +25,11 @@ coach -p CartPole_DQN -r
 <img src="img/doom_health.gif" alt="Doom Health Gathering"/> <img src="img/minitaur.gif" alt="PyBullet Minitaur" width = "249" height ="200"/> <img src="img/ant.gif" alt="Gym Extensions Ant"/>
 <br><br>
 
+Blog posts from the Intel® AI website:
 * [Release 0.8.0](https://ai.intel.com/reinforcement-learning-coach-intel/) (initial release)
 * [Release 0.9.0](https://ai.intel.com/reinforcement-learning-coach-carla-qr-dqn/)
 * [Release 0.10.0](https://ai.intel.com/introducing-reinforcement-learning-coach-0-10-0/)
-* [Release 0.11.0](https://ai.intel.com/rl-coach-data-science-at-scale)
-* Release 0.12.0 (current release)
+* [Release 0.11.0](https://ai.intel.com/rl-coach-data-science-at-scale) (current release)
 
 Contacting the Coach development team is also possible through the email [coach@intel.com](coach@intel.com)
 
@@ -55,8 +55,6 @@ One of the main challenges when building a research project, or a solution based
 ## Documentation
 
 Framework documentation, algorithm description and instructions on how to contribute a new agent/environment can be found [here](https://nervanasystems.github.io/coach/).
-
-Jupyter notebooks demonstrating how to run Coach from command line or as a library, implement an algorithm, or integrate an environment can be found [here](https://github.com/NervanaSystems/coach/tree/master/tutorials).
 
 
 ## Installation
@@ -165,17 +163,12 @@ For example:
 
 It is easy to create new presets for different levels or environments by following the same pattern as in presets.py
 
-More usage examples can be found [here](https://github.com/NervanaSystems/coach/blob/master/tutorials/0.%20Quick%20Start%20Guide.ipynb).
+More usage examples can be found [here](https://nervanasystems.github.io/coach/usage/index.html).
 
 ### Distributed Multi-Node Coach
 
-As of release 0.11.0, Coach supports horizontal scaling for training RL agents on multiple nodes. In release 0.11.0 this was tested on the ClippedPPO and DQN agents.
-For usage instructions please refer to the documentation [here](https://nervanasystems.github.io/coach/dist_usage.html).
-
-### Batch Reinforcement Learning
-
-Training and evaluating an agent from a dataset of experience, where no simulator is available, is supported in Coach. 
-There are [example](https://github.com/NervanaSystems/coach/blob/master/rl_coach/presets/CartPole_DDQN_BatchRL.py) [presets](https://github.com/NervanaSystems/coach/blob/master/rl_coach/presets/Acrobot_DDQN_BCQ_BatchRL.py) and a [tutorial](https://github.com/NervanaSystems/coach/blob/master/tutorials/4.%20Batch%20Reinforcement%20Learning.ipynb). 
+As of release 0.11 Coach supports horizontal scaling for training RL agents on multiple nodes. In release 0.11 this was tested on the ClippedPPO and DQN agents.
+For usage instructions please refer to the documentation [here](https://nervanasystems.github.io/coach/dist_usage.html)
 
 ### Running Coach Dashboard (Visualization)
 Training an agent to solve an environment can be tricky, at times. 
@@ -233,12 +226,6 @@ dashboard
 
     https://github.com/carla-simulator/carla/releases
 
-    Install the python client and dependencies from the release tarball:
-    ```
-    pip3 install -r PythonClient/requirements.txt
-    pip3 install PythonClient
-    ```
-
     Create a new CARLA_ROOT environment variable pointing to CARLA's installation directory.
 
     A simple CARLA settings file (```CarlaSettings.ini```) is supplied with Coach, and is located in the ```environments``` directory.
@@ -258,7 +245,7 @@ dashboard
 
 ## Supported Algorithms
 
-<img src="docs_raw/source/_static/img/algorithms.png" alt="Coach Design" style="width: 800px;"/>
+<img src="img/algorithms.png" alt="Coach Design" style="width: 800px;"/>
 
 
 
@@ -283,8 +270,6 @@ dashboard
 * [Proximal Policy Optimization (PPO)](https://arxiv.org/pdf/1707.06347.pdf)  ([code](rl_coach/agents/ppo_agent.py))
 * [Clipped Proximal Policy Optimization (CPPO)](https://arxiv.org/pdf/1707.06347.pdf) | **Multi Worker Single Node**  ([code](rl_coach/agents/clipped_ppo_agent.py))
 * [Generalized Advantage Estimation (GAE)](https://arxiv.org/abs/1506.02438) ([code](rl_coach/agents/actor_critic_agent.py#L86))
-* [Sample Efficient Actor-Critic with Experience Replay (ACER)](https://arxiv.org/abs/1611.01224) | **Multi Worker Single Node**  ([code](rl_coach/agents/acer_agent.py))
-* [Soft Actor-Critic (SAC)](https://arxiv.org/abs/1801.01290) ([code](rl_coach/agents/soft_actor_critic_agent.py))
 
 ### General Agents
 * [Direct Future Prediction (DFP)](https://arxiv.org/abs/1611.01779) | **Multi Worker Single Node**  ([code](rl_coach/agents/dfp_agent.py))
@@ -294,7 +279,7 @@ dashboard
 * [Conditional Imitation Learning](https://arxiv.org/abs/1710.02410) ([code](rl_coach/agents/cil_agent.py))
 
 ### Hierarchical Reinforcement Learning Agents
-* [Hierarchical Actor Critic (HAC)](https://arxiv.org/abs/1712.00948.pdf) ([code](rl_coach/agents/hac_ddpg_agent.py))
+* [Hierarchical Actor Critic (HAC)](https://arxiv.org/abs/1712.00948.pdf) ([code](rl_coach/agents/ddpg_hac_agent.py))
 
 ### Memory Types
 * [Hindsight Experience Replay (HER)](https://arxiv.org/abs/1707.01495.pdf) ([code](rl_coach/memories/episodic/episodic_hindsight_experience_replay.py))
