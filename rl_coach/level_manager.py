@@ -150,10 +150,6 @@ class LevelManager(EnvironmentInterface):
                                   action=action_space,
                                   reward=self.real_environment.reward_space)
 
-        print('3333333333')
-        print(spaces)
-
-
         [agent.set_environment_parameters(spaces) for agent in self.agents.values()]
 
     def setup_logger(self) -> None:
