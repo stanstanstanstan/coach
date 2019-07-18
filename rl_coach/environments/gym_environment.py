@@ -320,6 +320,7 @@ class GymEnvironment(Environment):
 
         self.state_space = StateSpace({})
 
+
         # observations
         if not isinstance(self.env.observation_space, gym.spaces.dict_space.Dict):
             state_space = {'observation': self.env.observation_space}
@@ -424,8 +425,8 @@ class GymEnvironment(Environment):
 
 
         print('1111111')
-        print(state_space)
-        print(state_space.sub_spaces)
+        print(self.state_space)
+        print(self.state_space.sub_spaces)
 
 
     def _wrap_state(self, state):
