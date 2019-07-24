@@ -146,13 +146,13 @@ class DFPAgent(Agent):
 
         network_inputs = batch.states(network_keys)
         network_inputs['goal'] = np.repeat(np.expand_dims(self.current_goal, 0),
-                                           self.ap.network_wrappers['main'].batch_size, axis=0)
+                                           batch.size, axis=0)
 
         # get the current outputs of the network
         targets = self.networks['main'].online_network.predict(network_inputs)
 
         # change the targets for the taken actions
-        for i in range(self.ap.network_wrappers['main'].batch_size):
+        for i in range(batch.size):
             targets[i, batch.actions()[i]] = batch[i].info['future_measurements'].flatten()
 
         result = self.networks['main'].train_and_sync_networks(network_inputs, targets)
@@ -182,7 +182,7 @@ class DFPAgent(Agent):
             action_values = None
 
         # choose action according to the exploration policy and the current phase (evaluating or training the agent)
-        action = self.exploration_policy.get_action(action_values)
+        action, _ = self.exploration_policy.get_action(action_values)
 
         if action_values is not None:
             action_values = action_values.squeeze()

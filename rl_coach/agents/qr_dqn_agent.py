@@ -13,7 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
+from copy import copy
 from typing import Union
 
 import numpy as np
@@ -79,6 +79,17 @@ class QuantileRegressionDQNAgent(ValueOptimizationAgent):
             actions_q_values = None
         return actions_q_values
 
+    # prediction's format is (batch,actions,atoms)
+    def get_all_q_values_for_states_and_softmax_probabilities(self, states: StateType):
+        actions_q_values, softmax_probabilities = None, None
+        if self.exploration_policy.requires_action_values():
+            outputs = copy(self.networks['main'].online_network.outputs)
+            outputs.append(self.networks['main'].online_network.output_heads[0].softmax)
+            quantile_values, softmax_probabilities = self.get_prediction(states, outputs)
+            actions_q_values = self.get_q_values(quantile_values)
+
+        return actions_q_values, softmax_probabilities
+
     def learn_from_batch(self, batch):
         network_keys = self.ap.network_wrappers['main'].input_embedders_parameters.keys()
 
@@ -88,11 +99,14 @@ class QuantileRegressionDQNAgent(ValueOptimizationAgent):
             (self.networks['main'].online_network, batch.states(network_keys))
         ])
 
+        # add Q value samples for logging
+        self.q_values.add_sample(self.get_q_values(current_quantiles))
+
         # get the optimal actions to take for the next states
         target_actions = np.argmax(self.get_q_values(next_state_quantiles), axis=1)
 
         # calculate the Bellman update
-        batch_idx = list(range(self.ap.network_wrappers['main'].batch_size))
+        batch_idx = list(range(batch.size))
 
         TD_targets = batch.rewards(True) + (1.0 - batch.game_overs(True)) * self.ap.algorithm.discount \
                                * next_state_quantiles[batch_idx, target_actions]
@@ -103,9 +117,9 @@ class QuantileRegressionDQNAgent(ValueOptimizationAgent):
         # calculate the cumulative quantile probabilities and reorder them to fit the sorted quantiles order
         cumulative_probabilities = np.array(range(self.ap.algorithm.atoms + 1)) / float(self.ap.algorithm.atoms) # tau_i
         quantile_midpoints = 0.5*(cumulative_probabilities[1:] + cumulative_probabilities[:-1])  # tau^hat_i
-        quantile_midpoints = np.tile(quantile_midpoints, (self.ap.network_wrappers['main'].batch_size, 1))
+        quantile_midpoints = np.tile(quantile_midpoints, (batch.size, 1))
         sorted_quantiles = np.argsort(current_quantiles[batch_idx, batch.actions()])
-        for idx in range(self.ap.network_wrappers['main'].batch_size):
+        for idx in range(batch.size):
             quantile_midpoints[idx, :] = quantile_midpoints[idx, sorted_quantiles[idx]]
 
         # train

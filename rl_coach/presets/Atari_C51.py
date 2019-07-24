@@ -8,7 +8,7 @@ from rl_coach.graph_managers.basic_rl_graph_manager import BasicRLGraphManager
 # Agent #
 #########
 agent_params = CategoricalDQNAgentParameters()
-agent_params.network_wrappers['main'].learning_rate = 0.00025
+agent_params.network_wrappers['main'].learning_rate = 0.01
 
 ###############
 # Environment #

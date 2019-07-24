@@ -102,10 +102,7 @@ class TensorFlowArchitecture(Architecture):
             self.global_step = tf.train.get_or_create_global_step()
 
             # build the network
-            self.get_model()
-
-            # model weights
-            self.weights = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope=self.full_name)
+            self.weights = self.get_model()
 
             # create the placeholder for the assigning gradients and some tensorboard summaries for the weights
             for idx, var in enumerate(self.weights):
@@ -124,12 +121,6 @@ class TensorFlowArchitecture(Architecture):
 
             # gradients ops
             self._create_gradient_ops()
-
-            # L2 regularization
-            if self.network_parameters.l2_regularization != 0:
-                self.l2_regularization = [tf.add_n([tf.nn.l2_loss(v) for v in self.weights])
-                                          * self.network_parameters.l2_regularization]
-                tf.add_to_collection(tf.GraphKeys.REGULARIZATION_LOSSES, self.l2_regularization)
 
             self.inc_step = self.global_step.assign_add(1)
 
@@ -150,11 +141,13 @@ class TensorFlowArchitecture(Architecture):
             # set the fetches for training
             self._set_initial_fetch_list()
 
-    def get_model(self) -> None:
+    def get_model(self) -> List:
         """
         Constructs the model using `network_parameters` and sets `input_embedders`, `middleware`,
         `output_heads`, `outputs`, `losses`, `total_loss`, `adaptive_learning_rate_scheme`,
-        `current_learning_rate`, and `optimizer`
+        `current_learning_rate`, and `optimizer`.
+
+        :return: A list of the model's weights
         """
         raise NotImplementedError
 
@@ -350,7 +343,7 @@ class TensorFlowArchitecture(Architecture):
                 importance_weight = np.ones(target_ph.shape[0])
             else:
                 importance_weight = importance_weights[placeholder_idx]
-            importance_weight = np.reshape(importance_weight, (-1,) + (1,)*(len(target_ph.shape)-1))
+            importance_weight = np.reshape(importance_weight, (-1,) + (1,) * (len(target_ph.shape) - 1))
 
             feed_dict[self.importance_weights[placeholder_idx]] = importance_weight
 
@@ -363,10 +356,15 @@ class TensorFlowArchitecture(Architecture):
                 feed_dict[self.middleware.h_in] = self.middleware.h_init
 
             fetches = self.train_fetches + additional_fetches
+            #print('self.train_fetches:', self.train_fetches)
+            #print('additional_fetches:', additional_fetches)
             if self.ap.visualization.tensorboard:
                 fetches += [self.merged]
 
             # get grads
+            #print('fetches:', fetches)
+            #print('feed_dict:', feed_dict)
+            #fetches = [for elem in fetches]
             result = self.sess.run(fetches, feed_dict=feed_dict)
             if hasattr(self, 'train_writer') and self.train_writer is not None:
                 self.train_writer.add_summary(result[-1], self.sess.run(self.global_step))

@@ -33,7 +33,7 @@ def maybe_download(dataset_root):
         screen.log_title("Downloading the CARLA dataset. This might take a while.")
 
         google_drive_download_id = "1hloAeyamYn-H6MfV1dRtY1gJPhkR55sY"
-        filename_to_save = "datasets/CORL2017ImitationLearningData.tar.gz"
+        filename_to_save = "~/Download/CORL2017ImitationLearningData.tar.gz"
         download_command = 'wget --load-cookies /tmp/cookies.txt "https://docs.google.com/uc?export=download&confirm=' \
                            '$(wget --quiet --save-cookies /tmp/cookies.txt --keep-session-cookies ' \
                            '--no-check-certificate \"https://docs.google.com/uc?export=download&id={}\" -O- | ' \
@@ -47,14 +47,14 @@ def maybe_download(dataset_root):
         unzip_command = 'tar -xzf {} --checkpoint=.10000'.format(filename_to_save)
         if dataset_root is not None:
             unzip_command += " -C {}".format(dataset_root)
-
+        print(dataset_root)
         if not os.path.exists(dataset_root):
             os.makedirs(dataset_root)
         start_shell_command_and_wait(unzip_command)
 
 
 def create_dataset(dataset_root, output_path):
-    maybe_download(dataset_root)
+    #maybe_download(dataset_root)
 
     dataset_root = os.path.join(dataset_root, 'AgentHuman')
     train_set_root = os.path.join(dataset_root, 'SeqTrain')
@@ -62,6 +62,7 @@ def create_dataset(dataset_root, output_path):
 
     # training set extraction
     memory = ExperienceReplay(max_size=(MemoryGranularity.Transitions, sys.maxsize))
+    print(train_set_root)
     train_set_files = sorted(os.listdir(train_set_root))
     print("found {} files".format(len(train_set_files)))
     progress_bar = ProgressBar(len(train_set_files))

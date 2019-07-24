@@ -17,7 +17,6 @@
 import random
 import sys
 from os import path, environ
-
 from rl_coach.logger import screen
 from rl_coach.filters.action.partial_discrete_action_space_map import PartialDiscreteActionSpaceMap
 from rl_coach.filters.observation.observation_rgb_to_y_filter import ObservationRGBToYFilter
@@ -27,7 +26,8 @@ try:
     if 'CARLA_ROOT' in environ:
         sys.path.append(path.join(environ.get('CARLA_ROOT'), 'PythonClient'))
     else:
-        screen.error("CARLA_ROOT was not defined. Please set it to point to the CARLA root directory and try again.")
+        screen.error("CARLA_ROOT was not defined. Please set it to point to the CARLA root directory and try again.", crash=False)
+
     from carla.client import CarlaClient
     from carla.settings import CarlaSettings
     from carla.tcp import TCPConnectionError
@@ -39,27 +39,27 @@ except ImportError:
     from rl_coach.logger import failed_imports
     failed_imports.append("CARLA")
 
-import logging
-import subprocess
-from rl_coach.environments.environment import Environment, EnvironmentParameters, LevelSelection
-from rl_coach.spaces import BoxActionSpace, ImageObservationSpace, StateSpace, \
-    VectorObservationSpace
-from rl_coach.utils import get_open_port, force_list
-from enum import Enum
 import os
 import signal
+import logging
+import subprocess
+import numpy as np
+from rl_coach.environments.environment import Environment, EnvironmentParameters, LevelSelection
+from rl_coach.spaces import BoxActionSpace, ImageObservationSpace, StateSpace, VectorObservationSpace
+from rl_coach.utils import get_open_port, force_list
+from enum import Enum
 from typing import List, Union
 from rl_coach.base_parameters import VisualizationParameters
 from rl_coach.filters.filter import InputFilter, NoOutputFilter
 from rl_coach.filters.observation.observation_rescale_to_size_filter import ObservationRescaleToSizeFilter
 from rl_coach.filters.observation.observation_stacking_filter import ObservationStackingFilter
-import numpy as np
 
 
 # enum of the available levels and their path
 class CarlaLevel(Enum):
     TOWN1 = {"map_name": "Town01", "map_path": "/Game/Maps/Town01"}
     TOWN2 = {"map_name": "Town02", "map_path": "/Game/Maps/Town02"}
+
 
 key_map = {
     'BRAKE': (274,),  # down arrow
@@ -99,7 +99,7 @@ class CarlaEnvironmentParameters(EnvironmentParameters):
 
     def __init__(self, level="town1"):
         super().__init__(level=level)
-        self.frame_skip = 3  # the frame skip affects the fps of the server directly. fps = 30 / frameskip
+        self.frame_skip = 2  # the frame skip affects the fps of the server directly. fps = 30 / frameskip
         self.server_height = 512
         self.server_width = 720
         self.camera_height = 128
@@ -115,7 +115,7 @@ class CarlaEnvironmentParameters(EnvironmentParameters):
         self.allow_braking = False
         self.separate_actions_for_throttle_and_brake = False
         self.num_speedup_steps = 30
-        self.max_speed = 35.0  # km/h
+        self.max_speed = 70.0  # km/h
         self.default_input_filter = CarlaInputFilter
         self.default_output_filter = CarlaOutputFilter
 

@@ -76,7 +76,6 @@ class NetworkWrapper(object):
 
         # Online network - local copy of the main network used for playing
         self.online_network = None
-
         self.online_network = general_network(variable_scope=variable_scope,
                                               devices=force_list(worker_device),
                                               agent_parameters=agent_parameters,

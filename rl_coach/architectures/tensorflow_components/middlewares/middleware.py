@@ -49,6 +49,7 @@ class Middleware(object):
         # layers order is conv -> batchnorm -> activation -> dropout
         if isinstance(self.scheme, MiddlewareScheme):
             self.layers_params = copy.copy(self.schemes[self.scheme])
+            self.layers_params = [convert_layer(l) for l in self.layers_params]
         else:
             # if scheme is specified directly, convert to TF layer if it's not a callable object
             # NOTE: if layer object is callable, it must return a TF tensor when invoked
@@ -63,7 +64,6 @@ class Middleware(object):
                                           BatchnormActivationDropout(batchnorm=self.batchnorm,
                                                                      activation_function=self.activation_function,
                                                                      dropout_rate=self.dropout_rate))
-
     def __call__(self, input_layer: tf.Tensor) -> Tuple[tf.Tensor, tf.Tensor]:
         """
         Wrapper for building the module graph including scoping and loss creation

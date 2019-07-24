@@ -1,4 +1,4 @@
-#
+ #
 # Copyright (c) 2017 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -55,7 +55,6 @@ class LSTMMiddleware(Middleware):
                 layer_params(self.layers[-1], name='fc{}'.format(idx),
                              is_training=self.is_training)
             ))
-
         # add the LSTM layer
         lstm_cell = tf.nn.rnn_cell.BasicLSTMCell(self.number_of_lstm_cells, state_is_tuple=True)
         self.c_init = np.zeros((1, lstm_cell.state_size.c), np.float32)
@@ -72,6 +71,7 @@ class LSTMMiddleware(Middleware):
         lstm_c, lstm_h = lstm_state
         self.state_out = (lstm_c[:1, :], lstm_h[:1, :])
         self.output = tf.reshape(lstm_outputs, [-1, self.number_of_lstm_cells])
+
 
     @property
     def schemes(self):

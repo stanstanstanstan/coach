@@ -56,3 +56,11 @@ class LSTMMiddlewareParameters(MiddlewareParameters):
                          scheme=scheme, batchnorm=batchnorm, dropout_rate=dropout_rate, name=name, dense_layer=dense_layer,
                          is_training=is_training)
         self.number_of_lstm_cells = number_of_lstm_cells
+
+class VGG16MiddlewareParameters(MiddlewareParameters):
+    def __init__(self, activation_function='none',
+                 scheme: MiddlewareScheme = MiddlewareScheme.Empty,
+                 name="middleware_vgg16_embedder", dense_layer=None, is_training=False):
+        super().__init__(parameterized_class_name="VGG16Middleware", activation_function=activation_function,
+                         scheme=scheme, name=name, dense_layer=dense_layer,
+                         is_training=is_training)

@@ -16,6 +16,7 @@
 from typing import Union, List
 
 import tensorflow as tf
+from keras.applications.vgg16 import VGG16
 
 from rl_coach.architectures.tensorflow_components.layers import batchnorm_activation_dropout, Dense
 from rl_coach.architectures.tensorflow_components.middlewares.middleware import Middleware
@@ -39,12 +40,13 @@ class FCMiddleware(Middleware):
         self.layers.append(self.input)
 
         for idx, layer_params in enumerate(self.layers_params):
+
             self.layers.extend(force_list(
                 layer_params(self.layers[-1], name='{}_{}'.format(layer_params.__class__.__name__, idx),
-                             is_training=self.is_training)
+                            is_training=self.is_training)
             ))
-
         self.output = self.layers[-1]
+
 
     @property
     def schemes(self):
@@ -60,7 +62,7 @@ class FCMiddleware(Middleware):
 
             # dqn
             MiddlewareScheme.Medium:
-                [
+                [   
                     self.dense_layer(512)
                 ],
 

@@ -14,10 +14,10 @@
 # limitations under the License.
 #
 
-from typing import List, Tuple, Union, Dict, Any
+from typing import List, Tuple, Union
 import pickle
-import sys
-import time
+import random
+import math
 
 import numpy as np
 
@@ -54,6 +54,7 @@ class ExperienceReplay(Memory):
         self.allow_duplicates_in_batch_sampling = allow_duplicates_in_batch_sampling
 
         self.reader_writer_lock = ReaderWriterLock()
+        self.frozen = False
 
     def length(self) -> int:
         """
@@ -72,7 +73,6 @@ class ExperienceReplay(Memory):
         Sample a batch of transitions form the replay buffer. If the requested size is larger than the number
         of samples available in the replay buffer then the batch will return empty.
         :param size: the size of the batch to sample
-        :param beta: the beta parameter used for importance sampling
         :return: a batch (list) of selected transitions from the replay buffer
         """
         self.reader_writer_lock.lock_writing()
@@ -91,6 +91,28 @@ class ExperienceReplay(Memory):
 
         self.reader_writer_lock.release_writing()
         return batch
+
+    def get_shuffled_training_data_generator(self, size: int) -> List[Transition]:
+        """
+        Get an generator for iterating through the shuffled replay buffer, for processing the data in epochs.
+        If the requested size is larger than the number of samples available in the replay buffer then the batch will
+        return empty. The last returned batch may be smaller than the size requested, to accommodate for all the
+        transitions in the replay buffer.
+
+        :param size: the size of the batch to return
+        :return: a batch (list) of selected transitions from the replay buffer
+        """
+        self.reader_writer_lock.lock_writing()
+        shuffled_transition_indices = list(range(len(self.transitions)))
+        random.shuffle(shuffled_transition_indices)
+
+        # we deliberately drop some of the ending data which is left after dividing to batches of size `size`
+        # for i in range(math.ceil(len(shuffled_transition_indices) / size)):
+        for i in range(int(len(shuffled_transition_indices) / size)):
+            sample_data = [self.transitions[j] for j in shuffled_transition_indices[i * size: (i + 1) * size]]
+            self.reader_writer_lock.release_writing()
+
+            yield sample_data
 
     def _enforce_max_length(self) -> None:
         """
@@ -114,6 +136,8 @@ class ExperienceReplay(Memory):
                      locks and then calls store with lock = True
         :return: None
         """
+        self.assert_not_frozen()
+
         # Calling super.store() so that in case a memory backend is used, the memory backend can store this transition.
         super().store(transition)
         if lock:
@@ -154,6 +178,8 @@ class ExperienceReplay(Memory):
         :param transition_index: the index of the transition to remove
         :return: None
         """
+        self.assert_not_frozen()
+
         if lock:
             self.reader_writer_lock.lock_writing_and_reading()
 
@@ -186,6 +212,8 @@ class ExperienceReplay(Memory):
         Clean the memory by removing all the episodes
         :return: None
         """
+        self.assert_not_frozen()
+
         if lock:
             self.reader_writer_lock.lock_writing_and_reading()
 
@@ -215,12 +243,14 @@ class ExperienceReplay(Memory):
         with open(file_path, 'wb') as file:
             pickle.dump(self.transitions, file)
 
-    def load(self, file_path: str) -> None:
+    def load_pickled(self, file_path: str) -> None:
         """
         Restore the replay buffer contents from a pickle file.
         The pickle file is assumed to include a list of transitions.
         :param file_path: The path to a pickle file to restore
         """
+        self.assert_not_frozen()
+
         with open(file_path, 'rb') as file:
             transitions = pickle.load(file)
             num_transitions = len(transitions)
@@ -238,3 +268,18 @@ class ExperienceReplay(Memory):
                     progress_bar.update(transition_idx)
 
             progress_bar.close()
+
+    def freeze(self):
+        """
+        Freezing the replay buffer does not allow any new transitions to be added to the memory.
+        Useful when working with a dataset (e.g. batch-rl or imitation learning).
+        :return: None
+        """
+        self.frozen = True
+
+    def assert_not_frozen(self):
+        """
+        Check that the memory is not frozen, and can be changed.
+        :return:
+        """
+        assert self.frozen is False, "Memory is frozen, and cannot be changed."

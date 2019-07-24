@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 from typing import Union
 
 import numpy as np
@@ -83,12 +82,21 @@ class CategoricalDQNAgent(ValueOptimizationAgent):
 
     # prediction's format is (batch,actions,atoms)
     def get_all_q_values_for_states(self, states: StateType):
+        q_values = None
         if self.exploration_policy.requires_action_values():
-            prediction = self.get_prediction(states)
-            q_values = self.distribution_prediction_to_q_values(prediction)
-        else:
-            q_values = None
+            q_values = self.get_prediction(states,
+                                           outputs=[self.networks['main'].online_network.output_heads[0].q_values])
+
         return q_values
+
+    def get_all_q_values_for_states_and_softmax_probabilities(self, states: StateType):
+        actions_q_values, softmax_probabilities = None, None
+        if self.exploration_policy.requires_action_values():
+            outputs = [self.networks['main'].online_network.output_heads[0].q_values,
+                       self.networks['main'].online_network.output_heads[0].softmax]
+            actions_q_values, softmax_probabilities = self.get_prediction(states, outputs=outputs)
+
+        return actions_q_values, softmax_probabilities
 
     def learn_from_batch(self, batch):
         network_keys = self.ap.network_wrappers['main'].input_embedders_parameters.keys()
@@ -100,11 +108,14 @@ class CategoricalDQNAgent(ValueOptimizationAgent):
             (self.networks['main'].online_network, batch.states(network_keys))
         ])
 
+        # add Q value samples for logging
+        self.q_values.add_sample(self.distribution_prediction_to_q_values(TD_targets))
+
         # select the optimal actions for the next state
         target_actions = np.argmax(self.distribution_prediction_to_q_values(distributional_q_st_plus_1), axis=1)
-        m = np.zeros((self.ap.network_wrappers['main'].batch_size, self.z_values.size))
+        m = np.zeros((batch.size, self.z_values.size))
 
-        batches = np.arange(self.ap.network_wrappers['main'].batch_size)
+        batches = np.arange(batch.size)
 
         # an alternative to the for loop. 3.7x perf improvement vs. the same code done with for looping.
         # only 10% speedup overall - leaving commented out as the code is not as clear.
@@ -117,7 +128,7 @@ class CategoricalDQNAgent(ValueOptimizationAgent):
         # bj_ = (tzj_ - self.z_values[0]) / (self.z_values[1] - self.z_values[0])
         # u_ = (np.ceil(bj_)).astype(int)
         # l_ = (np.floor(bj_)).astype(int)
-        # m_ = np.zeros((self.ap.network_wrappers['main'].batch_size, self.z_values.size))
+        # m_ = np.zeros((batch.size, self.z_values.size))
         # np.add.at(m_, [batches, l_],
         #           np.transpose(distributional_q_st_plus_1[batches, target_actions], (1, 0)) * (u_ - bj_))
         # np.add.at(m_, [batches, u_],

@@ -25,6 +25,7 @@ from rl_coach.graph_managers.graph_manager import ScheduleParameters
 from rl_coach.schedules import ConstantSchedule
 from rl_coach.spaces import ImageObservationSpace
 from rl_coach.utilities.carla_dataset_to_replay_buffer import create_dataset
+from rl_coach.core_types import PickledReplayBuffer
 
 ####################
 # Graph Scheduling #
@@ -130,17 +131,21 @@ agent_params.algorithm.num_consecutive_playing_steps = EnvironmentSteps(0)
 
 # use the following command line to download and extract the CARLA dataset:
 # python rl_coach/utilities/carla_dataset_to_replay_buffer.py
-agent_params.memory.load_memory_from_file_path = "./datasets/carla_train_set_replay_buffer.p"
+path_to_dataset = "/home/local/IPAMNET/atimofeev/coach_env/lib/python3.6/site-packages/rl_coach/datasets" #"~/coach_env/lib/python3.6/site-packages/rl_coach/utilities"
+agent_params.memory.load_memory_from_file_path = PickledReplayBuffer(path_to_dataset)
 agent_params.memory.state_key_with_the_class_index = 'high_level_command'
 agent_params.memory.num_classes = 4
 
 # download dataset if it doesn't exist
-if not os.path.exists(agent_params.memory.load_memory_from_file_path):
+#if not os.path.exists(agent_params.memory.load_memory_from_file_path):
+if not os.path.exists(path_to_dataset):
     screen.log_title("The CARLA dataset is not present in the following path: {}"
-                     .format(agent_params.memory.load_memory_from_file_path))
+                      .format(path_to_dataset))
+                     #.format(agent_params.memory.load_memory_from_file_path))
     result = screen.ask_yes_no("Do you want to download it now?")
     if result:
-        create_dataset(None, "./datasets/carla_train_set_replay_buffer.p")
+        create_dataset(path_to_dataset, path_to_dataset)
+        #create_dataset(None, path_to_dataset)
     else:
         screen.error("Please update the path to the CARLA dataset in the CARLA_CIL preset", crash=True)
 

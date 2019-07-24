@@ -24,10 +24,9 @@ from rl_coach.agents.actor_critic_agent import ActorCriticAgent
 from rl_coach.agents.policy_optimization_agent import PolicyGradientRescaler
 from rl_coach.architectures.embedder_parameters import InputEmbedderParameters
 from rl_coach.architectures.head_parameters import PPOHeadParameters, VHeadParameters
-from rl_coach.architectures.middleware_parameters import FCMiddlewareParameters
+from rl_coach.architectures.middleware_parameters import FCMiddlewareParameters, VGG16MiddlewareParameters
 from rl_coach.base_parameters import AlgorithmParameters, NetworkParameters, \
     AgentParameters, DistributedTaskParameters
-
 from rl_coach.core_types import EnvironmentSteps, Batch
 from rl_coach.exploration_policies.additive_noise import AdditiveNoiseParameters
 from rl_coach.exploration_policies.categorical import CategoricalParameters
@@ -41,7 +40,7 @@ class PPOCriticNetworkParameters(NetworkParameters):
     def __init__(self):
         super().__init__()
         self.input_embedders_parameters = {'observation': InputEmbedderParameters(activation_function='tanh')}
-        self.middleware_parameters = FCMiddlewareParameters(activation_function='tanh')
+        self.middleware_parameters = VGG16MiddlewareParameters()#FCMiddlewareParameters(activation_function='tanh')
         self.heads_parameters = [VHeadParameters()]
         self.async_training = True
         self.l2_regularization = 0
@@ -53,7 +52,7 @@ class PPOActorNetworkParameters(NetworkParameters):
     def __init__(self):
         super().__init__()
         self.input_embedders_parameters = {'observation': InputEmbedderParameters(activation_function='tanh')}
-        self.middleware_parameters = FCMiddlewareParameters(activation_function='tanh')
+        self.middleware_parameters = VGG16MiddlewareParameters()#FCMiddlewareParameters(activation_function='tanh')
         self.heads_parameters = [PPOHeadParameters()]
         self.optimizer_type = 'Adam'
         self.async_training = True

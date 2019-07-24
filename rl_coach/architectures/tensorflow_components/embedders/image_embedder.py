@@ -32,7 +32,8 @@ class ImageEmbedder(InputEmbedder):
     """
 
     def __init__(self, input_size: List[int], activation_function=tf.nn.relu,
-                 scheme: EmbedderScheme=EmbedderScheme.Medium, batchnorm: bool=False, dropout_rate: float=0.0,
+                 #scheme: EmbedderScheme=EmbedderScheme.Medium, batchnorm: bool=False, dropout_rate: float=0.0,
+                 scheme: EmbedderScheme=EmbedderScheme.Empty, batchnorm: bool=False, dropout_rate: float=0.0,
                  name: str= "embedder", input_rescaling: float=255.0, input_offset: float=0.0, input_clipping=None,
                  dense_layer=Dense, is_training=False):
         super().__init__(input_size, activation_function, scheme, batchnorm, dropout_rate, name, input_rescaling,
